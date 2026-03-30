@@ -1,14 +1,8 @@
 # dreame-mocker
 
-Mock server for the Dreame vacuum cloud API. Simulates a **Dreame X50 Ultra Complete** so you can develop and test Home Assistant automations without hitting the real cloud.
+Python client that mocks the **Dreame mobile app** to control a **Dreame X50 Ultra Complete** robot vacuum via the Dreame cloud API. Built for Home Assistant automation development.
 
-## What it does
-
-- **OAuth2 token endpoint** — accepts any credentials, issues mock tokens
-- **Device list** — returns a virtual X50 Ultra Complete with configurable DID/model
-- **RPC command handler** — supports `get_properties`, `set_properties`, and `action` calls using real SIID/PIID/AIID mappings
-- **Device state machine** — simulates cleaning cycles, battery drain/charge, dock return, washing, drying, auto-empty
-- **MQTT-style status relay** — pushes property changes to connected clients over TCP (length-prefixed JSON frames)
+The Dreame X50 Ultra Complete is cloud-only — there is no local control protocol. This project acts as the phone app, talking to Dreame's real cloud servers to send commands to your robot. It also includes a local mock server for offline development and testing.
 
 ## Quick start
 
@@ -16,68 +10,262 @@ Mock server for the Dreame vacuum cloud API. Simulates a **Dreame X50 Ultra Comp
 # install
 uv sync
 
-# run (defaults: HTTP on :13267, MQTT relay on :19973)
-uv run dreame-mocker
+# configure credentials
+cp .env.example .env
+# edit .env with your Dreame account email
 
-# or with options
-uv run dreame-mocker --port 13267 --mqtt-port 19973 --device-name "My Vacuum" --log-level DEBUG
+# authenticate and run a test action on your real robot
+uv run python test_client.py
+
+# or run the local mock server for offline development
+uv run dreame-mocker
 ```
+
+## Authentication
+
+The test client supports two auth methods against the real Dreame cloud:
+
+### Email code login (default, works with Google/Apple accounts)
+
+```bash
+uv run python test_client.py
+```
+
+A verification code is sent to your email. Enter it at the prompt and you're in. No Dreame password needed — this works even if you signed up via Google or Apple.
+
+### Password login
+
+```bash
+uv run python test_client.py --password
+```
+
+Requires a Dreame password set on your account. The password is MD5-hashed with Dreame's salt before transmission.
+
+### .env configuration
+
+```bash
+DREAME_HOST=eu.iot.dreame.tech    # eu / us / cn region
+DREAME_PORT=13267
+DREAME_USERNAME=you@gmail.com
+DREAME_PASSWORD=                   # optional, only for --password mode
+```
+
+## How it works
+
+The Dreame X50 Ultra Complete communicates exclusively through Dreame's cloud:
+
+```
+┌─────────────┐        HTTPS        ┌──────────────────┐       MQTT       ┌─────────────┐
+│ dreame-mocker│ ◄──────────────────► │ Dreame Cloud API │ ◄───────────────► │ Your Robot  │
+│ (this client)│   :13267             │ *.iot.dreame.tech│                   │ X50 Ultra   │
+└─────────────┘                      └──────────────────┘                   └─────────────┘
+```
+
+This project replaces the Dreame phone app in that chain. It sends the same HTTPS requests the app would, using reverse-engineered authentication headers and API endpoints.
+
+### Real cloud headers
+
+Every request to the Dreame cloud requires:
+
+| Header | Value |
+|--------|-------|
+| `Authorization` | `Basic ZHJlYW1lX2FwcHYxOkFQXmR2QHpAU1FZVnhOODg=` |
+| `Tenant-Id` | `000000` |
+| `Dreame-Meta` | `cv=i_829` |
+| `Dreame-Rlc` | AES-ECB encrypted `region\|lang\|country` (key: `EETjszu*XI5znHsI`) |
+| `Dreame-Auth` | `bearer <access_token>` |
+| `User-Agent` | `Dreame_Smarthome/2.1.9 (iPhone; iOS 18.4.1; Scale/3.00)` |
 
 ## API endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/dreame-auth/oauth/token` | OAuth2 password/refresh grant |
-| POST | `/dreame-user-iot/iotuserbind/device/listV2` | List bound devices |
-| POST | `/dreame-iot-com-10000/device/sendCommand` | Send RPC command to device |
-| POST | `/dreame-iot-com-10000/device/properties` | Batch property get/set |
+### POST `/dreame-auth/oauth/token`
 
-## Example: authenticate and start cleaning
+**Email code login:**
+```
+grant_type=email
+email=<email>
+scope=all
+platform=IOS
+country=GB
+lang=en
+
++ headers: Sms-Key, Sms-Code
+```
+
+**Password login:**
+```
+grant_type=password
+username=<email>
+password=<MD5(password + "RAylYC%fmSKp7%Tq")>
+scope=all
+platform=IOS
+type=account
+country=GB
+lang=en
+```
+
+### POST `/dreame-user-iot/iotuserbind/device/listV2`
+
+Returns all devices bound to your account.
+
+### POST `/dreame-iot-com-10000/device/sendCommand`
+
+Send RPC commands. Supports `get_properties`, `set_properties`, and `action`.
+
+**Example — start cleaning:**
+
+```json
+{
+  "did": "<device_id>",
+  "id": 1,
+  "data": {
+    "did": "<device_id>",
+    "id": 1,
+    "method": "action",
+    "params": {"siid": 2, "aiid": 1}
+  }
+}
+```
+
+### POST `/dreame-iot-com-10000/device/properties`
+
+Batch property get/set.
+
+## Properties reference
+
+All properties are addressed by `(siid, piid)`. See `src/dreame_mocker/const.py` for code definitions.
+
+### Device state & battery
+
+| Property | SIID | PIID | Values |
+|----------|------|------|--------|
+| State | 2 | 1 | 1=Sweeping, 2=Idle, 3=Paused, 4=Error, 5=Returning, 6=Charging, 7=Mopping, 8=Drying, 9=Washing, 12=Sweep+Mop, 13=Charge Complete |
+| Error | 2 | 2 | 0 = no error |
+| Battery level | 3 | 1 | 0-100 |
+| Charging status | 3 | 2 | true/false |
+
+### Cleaning settings
+
+| Property | SIID | PIID | Values |
+|----------|------|------|--------|
+| Cleaning time (s) | 4 | 2 | seconds elapsed |
+| Cleaning area (m^2) | 4 | 3 | area cleaned |
+| Suction level | 4 | 4 | 0=Quiet, 1=Standard, 2=Strong, 3=Turbo |
+| Water volume | 4 | 5 | 1=Low, 2=Medium, 3=High |
+| Cleaning mode | 4 | 23 | 0=Sweeping, 1=Mopping, 2=Sweep+Mop |
+| Self-wash base status | 4 | 25 | dock station state |
+
+### Consumables
+
+| Property | SIID | PIID | Description |
+|----------|------|------|-------------|
+| Main brush time left | 9 | 1 | minutes remaining |
+| Main brush life | 9 | 2 | percentage |
+| Side brush time left | 10 | 1 | minutes remaining |
+| Side brush life | 10 | 2 | percentage |
+| Filter time left | 11 | 1 | minutes remaining |
+| Filter life | 11 | 2 | percentage |
+| Mop pad time left | 16 | 1 | minutes remaining |
+| Mop pad life | 16 | 2 | percentage |
+
+### Dust collection
+
+| Property | SIID | PIID | Values |
+|----------|------|------|--------|
+| Dust collection enabled | 15 | 3 | true/false |
+| Auto-empty status | 15 | 5 | 0=idle, 1=emptying |
+
+### Do Not Disturb
+
+| Property | SIID | PIID | Values |
+|----------|------|------|--------|
+| DND enabled | 12 | 1 | true/false |
+| DND start hour | 12 | 2 | 0-23 |
+| DND start minute | 12 | 3 | 0-59 |
+| DND end hour | 12 | 4 | 0-23 |
+| DND end minute | 12 | 5 | 0-59 |
+
+### Audio & other
+
+| Property | SIID | PIID | Values |
+|----------|------|------|--------|
+| Volume | 7 | 1 | 0-100 |
+| Timezone | 7 | 5 | IANA timezone string |
+
+## Actions reference
+
+| Action | SIID | AIID | Description |
+|--------|------|------|-------------|
+| Start | 2 | 1 | Begin cleaning in current cleaning mode |
+| Pause | 2 | 2 | Pause current cleaning cycle |
+| Charge | 3 | 1 | Return to dock and start charging |
+| Start custom | 4 | 1 | Start cleaning (same as Start) |
+| Stop | 4 | 2 | Stop cleaning, go idle |
+| Start washing | 4 | 4 | Start mop pad wash cycle |
+| Start drying | 4 | 5 | Start mop pad drying |
+| Auto-empty | 15 | 1 | Trigger dustbin auto-empty |
+
+## Local mock server
+
+For offline development, run the built-in mock server which simulates the Dreame cloud API locally:
 
 ```bash
-# get a token
-TOKEN=$(curl -s -X POST http://localhost:13267/dreame-auth/oauth/token \
-  -d "grant_type=password&username=test@example.com&password=test" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
-
-# list devices
-curl -s -X POST http://localhost:13267/dreame-user-iot/iotuserbind/device/listV2 \
-  -H "Authorization: Bearer $TOKEN"
-
-# start cleaning (action siid=2, aiid=1)
-DID="<did from device list>"
-curl -s -X POST http://localhost:13267/dreame-iot-com-10000/device/sendCommand \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"did\":\"$DID\",\"id\":1,\"data\":{\"did\":\"$DID\",\"id\":1,\"method\":\"action\",\"params\":{\"siid\":2,\"aiid\":1}}}"
+uv run dreame-mocker --log-level DEBUG
 ```
 
-## Configuration
+This starts:
+- HTTP API on `:13267` (same endpoints as the real cloud)
+- MQTT-style TCP status relay on `:19973` (pushes property changes)
 
-All options via CLI flags:
+The mock includes a full device state machine — cleaning cycles, battery drain/charge, dock return, etc. Point your `.env` at `localhost` to use it:
 
-```
---host           Bind address (default: 0.0.0.0)
---port           HTTP API port (default: 13267)
---mqtt-port      MQTT relay port (default: 19973)
---device-name    Virtual device name (default: X50 Ultra Complete)
---device-model   Model identifier (default: dreame.vacuum.r2532a)
---device-id      Device ID (auto-generated if omitted)
---log-level      DEBUG | INFO | WARNING | ERROR
+```bash
+DREAME_HOST=localhost
+DREAME_PORT=13267
 ```
 
-## Supported SIID/PIID properties
+### Mock server CLI flags
 
-See `src/dreame_mocker/const.py` for the full mapping. Key properties:
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--host` | string | `0.0.0.0` | Bind address |
+| `--port` | int | `13267` | HTTP API port |
+| `--mqtt-port` | int | `19973` | MQTT status relay port |
+| `--device-name` | string | `X50 Ultra Complete` | Virtual device display name |
+| `--device-model` | string | `dreame.vacuum.r2532a` | Model identifier |
+| `--device-id` | string | auto-generated | Device ID |
+| `--log-level` | choice | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 
-- **State** (2,1) — idle, sweeping, mopping, charging, etc.
-- **Battery** (3,1) — 0-100
-- **Suction level** (4,4) — quiet/standard/strong/turbo
-- **Water volume** (4,5) — low/medium/high
-- **Cleaning mode** (4,23) — sweep/mop/sweep+mop
+## Supported X50 Ultra Complete model variants
 
-## Supported actions
+- `dreame.vacuum.r2532a` (default)
+- `dreame.vacuum.r2532d`
+- `dreame.vacuum.r2532h`
+- `dreame.vacuum.r2532v`
+- `dreame.vacuum.r2532z`
+- `dreame.vacuum.r2538a`
+- `dreame.vacuum.r2538z`
 
-- Start (2,1), Pause (2,2), Return to dock (3,1), Stop (4,2)
-- Start custom clean (4,1), Start washing (4,4), Start drying (4,5)
-- Auto-empty dustbin (15,1)
+## Development
+
+```bash
+uv sync                              # install deps
+uv run pyright                        # type check (strict mode)
+uv run dreame-mocker --log-level DEBUG  # run mock server
+uv run python test_client.py          # test against real cloud
+```
+
+## Project structure
+
+```
+test_client.py              # real-cloud test client (mocks the phone app)
+src/dreame_mocker/
+  __init__.py               # package metadata
+  const.py                  # SIID/PIID/AIID mappings, enums, API paths
+  models.py                 # Pydantic request/response models
+  state.py                  # device state machine and registry
+  auth.py                   # OAuth2 mock token store
+  server.py                 # FastAPI mock server (all 4 endpoints)
+  mqtt.py                   # TCP status relay
+  cli.py                    # mock server CLI entry point
+```

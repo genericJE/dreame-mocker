@@ -1,5 +1,5 @@
 {
   "typeCheckingMode": "strict",
   "include": ["src/dreame_mocker"],
-  "pythonVersion": "3.12"
+  "pythonVersion": "3.13"
 }
