@@ -18,3 +18,8 @@ dreame-mocker = "dreame_mocker.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "pyright>=1.1.408",
+]

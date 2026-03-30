@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from .const import (
@@ -16,6 +17,14 @@ from .const import (
     SuctionLevel,
     WaterVolume,
 )
+
+# Callback signature: (did, siid, piid, value) -> None
+PropertyChangeCallback = Callable[[str, int, int, Any], None]
+
+# Typed dicts for batch specs / results
+PropertyGetSpec = dict[str, int]  # {"siid": ..., "piid": ...}
+PropertySetSpec = dict[str, Any]  # {"siid": ..., "piid": ..., "value": ...}
+PropertyResult = dict[str, Any]   # {"siid": ..., "piid": ..., "value"?: ..., "code": ...}
 
 
 class VacuumDevice:
@@ -36,7 +45,7 @@ class VacuumDevice:
         self.region = "eu"
         self.firmware_version = "4.5.2_1132"
 
-        self._on_property_change: list = []
+        self._on_property_change: list[PropertyChangeCallback] = []
 
         # Property store keyed by (siid, piid)
         self._properties: dict[tuple[int, int], Any] = {
@@ -69,10 +78,10 @@ class VacuumDevice:
             Property.TIMEZONE: "Europe/London",
         }
 
-        self._cleaning_task: asyncio.Task | None = None
+        self._cleaning_task: asyncio.Task[None] | None = None
         self._cleaning_start: float | None = None
 
-    def on_property_change(self, callback):
+    def on_property_change(self, callback: PropertyChangeCallback) -> None:
         self._on_property_change.append(callback)
 
     def _notify(self, key: tuple[int, int], value: Any) -> None:
@@ -91,11 +100,12 @@ class VacuumDevice:
         return True
 
     def get_properties_batch(
-        self, specs: list[dict],
-    ) -> list[dict]:
-        results = []
+        self, specs: list[PropertyGetSpec],
+    ) -> list[PropertyResult]:
+        results: list[PropertyResult] = []
         for spec in specs:
-            siid, piid = spec["siid"], spec["piid"]
+            siid: int = spec["siid"]
+            piid: int = spec["piid"]
             value = self.get_property(siid, piid)
             results.append({
                 "siid": siid,
@@ -106,11 +116,13 @@ class VacuumDevice:
         return results
 
     def set_properties_batch(
-        self, specs: list[dict],
-    ) -> list[dict]:
-        results = []
+        self, specs: list[PropertySetSpec],
+    ) -> list[PropertyResult]:
+        results: list[PropertyResult] = []
         for spec in specs:
-            siid, piid, value = spec["siid"], spec["piid"], spec["value"]
+            siid: int = spec["siid"]
+            piid: int = spec["piid"]
+            value: Any = spec["value"]
             ok = self.set_property(siid, piid, value)
             results.append({
                 "siid": siid,
@@ -119,7 +131,9 @@ class VacuumDevice:
             })
         return results
 
-    async def execute_action(self, siid: int, aiid: int, params: list | None = None) -> dict:
+    async def execute_action(
+        self, siid: int, aiid: int, params: list[Any] | None = None,
+    ) -> dict[str, Any]:
         action = (siid, aiid)
 
         if action == Action.START:
@@ -141,7 +155,7 @@ class VacuumDevice:
         else:
             return {"code": -1, "message": f"Unknown action {siid}.{aiid}"}
 
-    async def _start_cleaning(self) -> dict:
+    async def _start_cleaning(self) -> dict[str, Any]:
         mode = self._properties[Property.CLEANING_MODE]
         if mode == CleaningMode.SWEEPING:
             state = DeviceState.SWEEPING
@@ -175,7 +189,7 @@ class VacuumDevice:
         except asyncio.CancelledError:
             pass
 
-    async def _return_to_dock(self) -> dict:
+    async def _return_to_dock(self) -> dict[str, Any]:
         self._set_state(DeviceState.RETURNING)
         if self._cleaning_task and not self._cleaning_task.done():
             self._cleaning_task.cancel()
@@ -199,27 +213,27 @@ class VacuumDevice:
         except asyncio.CancelledError:
             pass
 
-    def _pause(self) -> dict:
+    def _pause(self) -> dict[str, Any]:
         if self._cleaning_task and not self._cleaning_task.done():
             self._cleaning_task.cancel()
         self._set_state(DeviceState.PAUSED)
         return {"code": 0}
 
-    def _stop(self) -> dict:
+    def _stop(self) -> dict[str, Any]:
         if self._cleaning_task and not self._cleaning_task.done():
             self._cleaning_task.cancel()
         self._set_state(DeviceState.IDLE)
         return {"code": 0}
 
-    def _start_washing(self) -> dict:
+    def _start_washing(self) -> dict[str, Any]:
         self._set_state(DeviceState.WASHING)
         return {"code": 0}
 
-    def _start_drying(self) -> dict:
+    def _start_drying(self) -> dict[str, Any]:
         self._set_state(DeviceState.DRYING)
         return {"code": 0}
 
-    def _start_auto_empty(self) -> dict:
+    def _start_auto_empty(self) -> dict[str, Any]:
         self._properties[Property.AUTO_EMPTY_STATUS] = 1
         self._notify(Property.AUTO_EMPTY_STATUS, 1)
         return {"code": 0}
@@ -228,7 +242,7 @@ class VacuumDevice:
         self._properties[Property.STATE] = state
         self._notify(Property.STATE, state)
 
-    def to_device_info(self) -> dict:
+    def to_device_info(self) -> dict[str, Any]:
         return {
             "did": self.did,
             "name": self.name,

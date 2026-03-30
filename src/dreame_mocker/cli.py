@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
-import sys
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 import uvicorn
+from fastapi import FastAPI
 
 from .auth import TokenStore
 from .mqtt import StatusRelay
@@ -75,18 +76,17 @@ def main(argv: list[str] | None = None) -> None:
     logger.info("HTTP API: http://%s:%d", args.host, args.port)
     logger.info("MQTT relay: %s:%d", args.host, args.mqtt_port)
 
+    # --- Lifespan for startup/shutdown ---
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+        await relay.start()
+        yield
+        await relay.stop()
+
     # --- Create FastAPI app ---
     from .server import create_app
 
-    app = create_app(registry, token_store)
-
-    @app.on_event("startup")
-    async def _start_relay():
-        await relay.start()
-
-    @app.on_event("shutdown")
-    async def _stop_relay():
-        await relay.stop()
+    app = create_app(registry, token_store, lifespan=lifespan)
 
     # --- Run ---
     uvicorn.run(app, host=args.host, port=args.port)

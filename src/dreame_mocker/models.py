@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
 # --- Auth ---
 
 class TokenResponse(BaseModel):
-    _key: str = Field(alias="access_token")
-    _secondary_key: str = Field(alias="refresh_token")
-    _uuid: str = Field(alias="uid")
-    _key_expire: int = Field(alias="expires_in")
+    key: str = Field(alias="access_token")
+    secondary_key: str = Field(alias="refresh_token")
+    uuid: str = Field(alias="uid")
+    key_expire: int = Field(alias="expires_in")
     token_type: str = "bearer"
 
 
@@ -27,13 +29,13 @@ class DeviceInfo(BaseModel):
     region: str
     firmware_version: str
     feature: int = 0
-    property_: dict = Field(default_factory=dict, alias="property")
+    property_: dict[str, Any] = Field(default_factory=dict, alias="property")
 
 
 class DeviceListResponse(BaseModel):
     code: int = 0
     msg: str = "ok"
-    data: list[DeviceInfo] = Field(default_factory=list)
+    data: list[DeviceInfo] = Field(default_factory=lambda: list[DeviceInfo]())
 
 
 # --- RPC command ---
@@ -42,7 +44,7 @@ class RPCParams(BaseModel):
     did: str
     id: int = 1
     method: str
-    params: list | dict | None = None
+    params: list[Any] | dict[str, Any] | None = None
 
 
 class RPCRequest(BaseModel):
@@ -53,7 +55,7 @@ class RPCRequest(BaseModel):
 
 class RPCResult(BaseModel):
     code: int = 0
-    data: dict = Field(default_factory=dict)
+    data: dict[str, Any] = Field(default_factory=dict)
     success: bool = True
 
 
