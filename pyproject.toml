@@ -1,0 +1,20 @@
+[project]
+name = "dreame-mocker"
+version = "0.1.0"
+description = "Mock server for the Dreame vacuum cloud API, enabling Home Assistant automation testing"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.0.0",
+    "gmqtt>=0.6.0",
+    "python-multipart>=0.0.9",
+]
+
+[project.scripts]
+dreame-mocker = "dreame_mocker.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
