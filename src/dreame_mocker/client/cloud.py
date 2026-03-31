@@ -97,10 +97,13 @@ class DreameCloud:
     async def connect(self) -> None:
         """Authenticate and resolve the correct device region.
 
-        1. Authenticate on configured region
-        2. Read account country from token response
-        3. If country maps to a different region, switch transport
+        1. Open transport if not already open
+        2. Authenticate on configured region
+        3. Read account country from token response
+        4. If country maps to a different region, switch transport
         """
+        if self._transport._client is None:
+            await self._transport.open()
         token = await self._auth.authenticate()
         self._uid = token.uid
 
