@@ -8,5 +8,7 @@ build/
 *.egg
 .venv/
 .env
+tokens.json
+CLAUDE.local.md
 .uv/
 uv.lock
