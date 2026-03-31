@@ -1,5 +1,5 @@
 {
   "typeCheckingMode": "strict",
-  "include": ["src/dreame_mocker"],
+  "include": ["src/dreame_mocker", "test_client.py"],
   "pythonVersion": "3.13"
 }

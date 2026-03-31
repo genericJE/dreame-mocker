@@ -1,4 +1,4 @@
-"""Constants for Dreame API mock — SIID/PIID/AIID mappings and device definitions."""
+"""Constants for Dreame API — SIID/PIID/AIID mappings, crypto, and device definitions."""
 
 from __future__ import annotations
 
@@ -17,13 +17,16 @@ DEFAULT_MODEL = "dreame.vacuum.r2532a"
 
 # --- Dreamehome cloud paths ---
 AUTH_PATH = "/dreame-auth/oauth/token"
+EMAIL_CODE_PATH = "/dreame-auth/oauth/email"
 DEVICE_LIST_PATH = "/dreame-user-iot/iotuserbind/device/listV2"
 SEND_COMMAND_PATH = "/dreame-iot-com-10000/device/sendCommand"
 PROPERTIES_PATH = "/dreame-iot-com-10000/device/properties"
+MAP_DOWNLOAD_URL_PATH = "/dreame-user-iot/iotfile/getDownloadUrl"
 
-# --- OAuth ---
+# --- Crypto ---
 CLIENT_CREDENTIALS_B64 = "ZHJlYW1lX2FwcHYxOkFQXmR2QHpAU1FZVnhOODg="
 PASSWORD_SALT = "RAylYC%fmSKp7%Tq"
+AES_KEY = b"EETjszu*XI5znHsI"
 
 # --- SIID definitions (service instance IDs) ---
 SIID_VACUUM = 2
@@ -62,8 +65,16 @@ class Property:
     VOLUME = (7, 1)
     VOICE_PACKET_ID = (7, 3)
     TIMEZONE = (7, 5)
+    # Map service (SIID 6)
     MAP_DATA = (6, 1)
-    MAP_LIST = (6, 3)
+    FRAME_INFO = (6, 2)
+    OBJECT_NAME = (6, 3)
+    MAP_EXTEND_DATA = (6, 4)
+    ROBOT_TIME = (6, 5)
+    RESULT_CODE = (6, 6)
+    MULTI_FLOOR_MAP = (6, 7)
+    MAP_LIST = (6, 8)
+    RECOVERY_MAP_LIST = (6, 9)
 
 # --- Action keys: (siid, aiid) ---
 class Action:
@@ -75,6 +86,8 @@ class Action:
     START_WASHING = (4, 4)
     START_DRYING = (4, 5)
     START_AUTO_EMPTY = (15, 1)
+    REQUEST_MAP = (6, 1)
+    UPDATE_MAP_DATA = (6, 2)
 
 # --- Device states ---
 class DeviceState:
@@ -89,6 +102,24 @@ class DeviceState:
     WASHING = 9
     SWEEP_AND_MOP = 12
     CHARGE_COMPLETE = 13
+    MOP_WASHING = 20
+    MOP_WASHING_PAUSED = 21
+
+STATES: dict[int, str] = {
+    1: "Sweeping",
+    2: "Idle",
+    3: "Paused",
+    4: "Error",
+    5: "Returning",
+    6: "Charging",
+    7: "Mopping",
+    8: "Drying",
+    9: "Washing",
+    12: "Sweep+Mop",
+    13: "Charge Complete",
+    20: "Mop Washing",
+    21: "Mop Washing Paused",
+}
 
 # --- Suction levels ---
 class SuctionLevel:
