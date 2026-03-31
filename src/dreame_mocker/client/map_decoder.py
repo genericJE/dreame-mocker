@@ -30,7 +30,7 @@ from .transport import DreameTransport
 logger = logging.getLogger(__name__)
 
 # Header is 27 bytes, all little-endian int16 except frame_type (1 byte).
-_HEADER_FMT = "<2hb8h"
+_HEADER_FMT = "<2hb11h"
 _HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 27
 
 

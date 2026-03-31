@@ -50,12 +50,14 @@ class DreameTransport:
     def __init__(
         self,
         region: str,
+        host: str | None = None,
         port: int = 13267,
         timeout: float = 15.0,
         *,
         is_mock: bool = False,
     ) -> None:
         self._region = region
+        self._host = host
         self._port = port
         self._timeout = timeout
         self._is_mock = is_mock
@@ -158,7 +160,8 @@ class DreameTransport:
 
     def _make_client(self) -> httpx.AsyncClient:
         if self._is_mock:
-            url = f"http://localhost:{self._port}"
+            host = self._host or "localhost"
+            url = f"http://{host}:{self._port}"
         else:
             url = base_url(self._region, self._port)
         return httpx.AsyncClient(base_url=url, timeout=self._timeout)

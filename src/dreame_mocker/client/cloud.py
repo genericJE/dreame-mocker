@@ -54,17 +54,13 @@ class DreameCloud:
         port: int = 13267,
         token_path: Path | None = None,
     ) -> None:
-        if host:
-            resolved_region = region_from_host(host)
-        else:
-            resolved_region = region
-
-        is_mock = host in ("localhost", "127.0.0.1") if host else False
+        is_mock = host is not None
+        resolved_region = region
 
         self._username = username
         self._port = port
         self._transport = DreameTransport(
-            region=resolved_region, port=port, is_mock=is_mock,
+            region=resolved_region, host=host, port=port, is_mock=is_mock,
         )
         self._token_store = TokenStore(path=token_path)
         self._auth = AuthManager(
