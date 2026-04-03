@@ -152,6 +152,8 @@ class VacuumDevice:
             return self._start_drying()
         elif action == Action.START_AUTO_EMPTY:
             return self._start_auto_empty()
+        elif action == Action.REQUEST_MAP:
+            return self._request_map()
         else:
             return {"code": -1, "message": f"Unknown action {siid}.{aiid}"}
 
@@ -232,6 +234,12 @@ class VacuumDevice:
     def _start_drying(self) -> dict[str, Any]:
         self._set_state(DeviceState.DRYING)
         return {"code": 0}
+
+    def _request_map(self) -> dict[str, Any]:
+        return {
+            "code": 0,
+            "out": [{"siid": 6, "piid": 3, "value": "mock/map/current.bin"}],
+        }
 
     def _start_auto_empty(self) -> dict[str, Any]:
         self._properties[Property.AUTO_EMPTY_STATUS] = 1

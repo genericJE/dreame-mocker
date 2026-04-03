@@ -9,10 +9,11 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Form, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from .auth import TokenStore
-from .const import AUTH_PATH, DEVICE_LIST_PATH, PROPERTIES_PATH, SEND_COMMAND_PATH
+from .const import AUTH_PATH, DEVICE_LIST_PATH, MAP_DOWNLOAD_URL_PATH, PROPERTIES_PATH, SEND_COMMAND_PATH
+from .map_encoder import generate_mock_map
 from .state import DeviceRegistry, VacuumDevice
 
 logger = logging.getLogger("dreame_mocker")
@@ -127,6 +128,26 @@ def create_app(
             results = device.get_properties_batch(specs)
 
         return JSONResponse({"code": 0, "data": results})
+
+    # --- Map support ---
+
+    _mock_map_data = generate_mock_map()
+
+    @app.post(MAP_DOWNLOAD_URL_PATH)
+    async def get_download_url(  # noqa: ARG001
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> JSONResponse:
+        _require_auth(authorization)
+        body: dict[str, Any] = await request.json()
+        filename: str = body.get("filename", "mock/map/current.bin")
+        host = request.headers.get("host", "localhost:13267")
+        url = f"http://{host}/mock-map/{filename}"
+        return JSONResponse({"code": 0, "data": {"url": url}})
+
+    @app.get("/mock-map/{path:path}")
+    async def serve_map(path: str) -> Response:  # noqa: ARG001
+        return Response(content=_mock_map_data, media_type="application/octet-stream")
 
     return app
 
