@@ -60,13 +60,13 @@ def create_app(
                 raise HTTPException(400, "username required")
             record = token_store.issue(username)
             logger.info("Issued token for %s", username)
-            return JSONResponse(dict(record))
+            return JSONResponse({k: v for k, v in record.items() if k != "issued_at"})
 
         if grant_type == "refresh_token":
             record = token_store.refresh(refresh_token)
             if not record:
                 raise HTTPException(401, "Invalid refresh token")
-            return JSONResponse(dict(record))
+            return JSONResponse({k: v for k, v in record.items() if k != "issued_at"})
 
         raise HTTPException(400, f"Unsupported grant_type: {grant_type}")
 

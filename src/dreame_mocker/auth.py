@@ -14,6 +14,8 @@ class TokenRecord(TypedDict):
     expires_in: int
     token_type: str
     username: str
+    country: str
+    region: str
     issued_at: float
 
 
@@ -36,6 +38,8 @@ class TokenStore:
             "expires_in": expires_in,
             "token_type": "bearer",
             "username": username,
+            "country": "EU",
+            "region": "eu",
             "issued_at": time.time(),
         }
         self._tokens[access_token] = record

@@ -187,7 +187,9 @@ class VacuumDevice:
                 self._properties[Property.CLEANING_TIME] = elapsed
                 self._properties[Property.CLEANING_AREA] = elapsed * 2
 
-            await self._return_to_dock()
+            # Transition to returning/charging without blocking.
+            self._set_state(DeviceState.RETURNING)
+            await self._simulate_return()
         except asyncio.CancelledError:
             pass
 
@@ -196,13 +198,19 @@ class VacuumDevice:
         if self._cleaning_task and not self._cleaning_task.done():
             self._cleaning_task.cancel()
 
-        await asyncio.sleep(3)
-        self._set_state(DeviceState.CHARGING)
-        self._properties[Property.CHARGING_STATUS] = True
-        self._notify(Property.CHARGING_STATUS, True)
-
-        asyncio.create_task(self._simulate_charging())
+        self._cleaning_task = asyncio.create_task(self._simulate_return())
         return {"code": 0}
+
+    async def _simulate_return(self) -> None:
+        """Simulate the return trip, then start charging."""
+        try:
+            await asyncio.sleep(3)
+            self._set_state(DeviceState.CHARGING)
+            self._properties[Property.CHARGING_STATUS] = True
+            self._notify(Property.CHARGING_STATUS, True)
+            await self._simulate_charging()
+        except asyncio.CancelledError:
+            pass
 
     async def _simulate_charging(self) -> None:
         try:

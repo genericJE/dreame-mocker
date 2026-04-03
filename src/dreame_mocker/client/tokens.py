@@ -70,11 +70,17 @@ class TokenStore:
     def save(self, token: StoredToken) -> None:
         """Persist a token to disk with restricted permissions."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(asdict(token), indent=2))
+        content = json.dumps(asdict(token), indent=2).encode()
         try:
-            os.chmod(self._path, 0o600)
+            # Write atomically with restricted permissions from the start.
+            fd = os.open(self._path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.write(fd, content)
+            finally:
+                os.close(fd)
         except OSError:
-            pass  # Windows doesn't support Unix permissions
+            # Fallback for platforms that don't support mode (e.g. Windows).
+            self._path.write_bytes(content)
         logger.debug("Token cached to %s", self._path)
 
     def clear(self) -> None:

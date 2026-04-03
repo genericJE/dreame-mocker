@@ -11,7 +11,7 @@ from dreame_mocker.const import DEVICE_LIST_PATH
 from .auth import AuthManager
 from .device import DreameDevice
 from .errors import DeviceNotFoundError
-from .regions import region_for_country, region_from_host
+from .regions import region_for_country
 from .tokens import TokenStore
 from .transport import DreameTransport
 
@@ -102,8 +102,9 @@ class DreameCloud:
         3. Read account country from token response
         4. If country maps to a different region, switch transport
         """
-        if self._transport._client is None:
-            await self._transport.open()
+        # Close stale client and open fresh to avoid reusing broken connections.
+        await self._transport.close()
+        await self._transport.open()
         token = await self._auth.authenticate()
         self._uid = token.uid
 

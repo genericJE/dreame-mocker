@@ -222,7 +222,7 @@ The client library is a fully async Python library in `src/dreame_mocker/client/
 - **Password login as default**: Email code login creates a separate identity from Google/Apple OAuth-linked accounts, so devices don't appear. Password login authenticates to the same account.
 - **Region auto-detection**: Auth can happen on any region, but device APIs must use the region matching the account's `country` field.
 - **Mock server kept**: `mqtt.py` and the mock server are useful for offline development even though the real robot is cloud-only. The mock server simulates the Dreame cloud API locally with a state machine.
-- **`const.py` bug**: `MAP_LIST` was originally `(6, 3)` but should be `(6, 8)`. PIID 3 is `OBJECT_NAME`, PIID 8 is the actual `MAP_LIST`.
+
 
 ## Known limitations
 

@@ -24,12 +24,17 @@ from dreame_mocker.client import DreameCloud
 
 load_dotenv(interpolate=False)
 
-HOST = os.environ.get("DREAME_HOST", "eu.iot.dreame.tech")
+HOST = os.environ.get("DREAME_HOST", "")
 PORT = int(os.environ.get("DREAME_PORT", "13267"))
 USERNAME = os.environ["DREAME_USERNAME"]
 PASSWORD = os.environ.get("DREAME_PASSWORD", "")
 TOKEN_PATH = os.environ.get("DREAME_TOKEN_PATH", "")
-REGION = HOST.split(".")[0] if HOST not in ("localhost", "127.0.0.1") else "eu"
+
+# Determine if we're connecting to a mock server or real cloud.
+_IS_MOCK = HOST in ("localhost", "127.0.0.1")
+REGION = HOST.split(".")[0] if HOST and not _IS_MOCK else "eu"
+# Only pass host to DreameCloud for mock servers; None means real cloud.
+CLOUD_HOST: str | None = HOST if _IS_MOCK else None
 
 logger = logging.getLogger("dreame")
 
@@ -99,7 +104,8 @@ async def main() -> None:
     async with DreameCloud(
         username=USERNAME,
         password=PASSWORD or None,
-        host=HOST,
+        region=REGION,
+        host=CLOUD_HOST,
         port=PORT,
         token_path=Path(TOKEN_PATH) if TOKEN_PATH else None,
     ) as cloud:
