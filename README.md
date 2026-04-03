@@ -1,8 +1,8 @@
 # dreame-mocker
 
-Python client that mocks the **Dreame mobile app** to control a **Dreame X50 Ultra Complete** robot vacuum via the Dreame cloud API. Built for Home Assistant automation development.
+Python client library and mock server for the **Dreame cloud API**. Built to control a **Dreame X50 Ultra Complete** robot vacuum from Home Assistant without depending on the Xiaomi cloud.
 
-The Dreame X50 Ultra Complete is cloud-only — there is no local control protocol. This project acts as the phone app, talking to Dreame's real cloud servers to send commands to your robot. It also includes a local mock server for offline development and testing.
+The Dreame X50 Ultra Complete is cloud-only -- there is no local control protocol. This project replaces the Dreame phone app, sending the same HTTPS requests to Dreame's cloud servers. It also includes a local mock server for offline development and testing.
 
 ## Quick start
 
@@ -12,9 +12,9 @@ uv sync
 
 # configure credentials
 cp .env.example .env
-# edit .env with your Dreame account email
+# edit .env with your Dreame account email and password
 
-# authenticate and run a test action on your real robot
+# run a test action on your real robot
 uv run python test_client.py
 
 # or run the local mock server for offline development
@@ -31,7 +31,7 @@ The test client supports two auth methods against the real Dreame cloud:
 uv run python test_client.py
 ```
 
-Requires a Dreame password set on your account (Dreame app → Settings → Account & Security → Password). Works with Google/Apple-linked accounts once a password is added. The password is MD5-hashed with Dreame's salt before transmission.
+Requires a Dreame password set on your account (Dreame app > Settings > Account & Security > Password). Works with Google/Apple-linked accounts once a password is added. The password is MD5-hashed with Dreame's salt before transmission.
 
 ### Email code login
 
@@ -40,36 +40,32 @@ uv run python test_client.py --email-code     # interactive (prompts for code)
 uv run python test_client.py --code 123456    # non-interactive
 ```
 
-A verification code is sent to your email. Note: this authenticates to a separate identity from Google/Apple-linked accounts — your devices may not be visible.
+A verification code is sent to your email. Note: this authenticates to a separate identity from Google/Apple-linked accounts -- your devices may not be visible.
 
 ### .env configuration
 
 ```bash
-DREAME_HOST=eu.iot.dreame.tech    # eu / us / cn region
+DREAME_HOST=                     # empty for real cloud, "localhost" for mock server
 DREAME_PORT=13267
 DREAME_USERNAME=you@gmail.com
 DREAME_PASSWORD=your_password
 DREAME_TOKEN_PATH=tokens.json    # token cache location (default: ~/.config/dreame-mocker/tokens.json)
 ```
 
-The client auto-detects the correct device region from your account's `country` field. You can authenticate against any region (e.g. `eu`) — the client will automatically switch to the correct region (e.g. `us`) for device API calls.
-
-Set `DREAME_TOKEN_PATH` to cache the auth token in your working directory instead of the default `~/.config/dreame-mocker/tokens.json`.
+When `DREAME_HOST` is empty (default), the client connects to the real Dreame cloud. It authenticates on `eu.iot.dreame.tech` and auto-detects the correct device region from your account's `country` field. Set `DREAME_HOST=localhost` to use the mock server instead.
 
 ## How it works
 
-The Dreame X50 Ultra Complete communicates exclusively through Dreame's cloud:
-
 ```
-┌───────────────┐         HTTPS       ┌──────────────────┐       MQTT        ┌─────────────┐
-│ dreame-mocker │ ◄─────────────────► │ Dreame Cloud API │ ◄───────────────► │ Your Robot  │
-│ (this client) │         :13267      │ *.iot.dreame.tech│                   │ X50 Ultra   │
-└───────────────┘                     └──────────────────┘                   └─────────────┘
++-----------------+         HTTPS       +--------------------+       MQTT        +---------------+
+| dreame-mocker   | <=================> | Dreame Cloud API   | <===============> | Your Robot    |
+| (this client)   |         :13267      | *.iot.dreame.tech  |                   | X50 Ultra     |
++-----------------+                     +--------------------+                   +---------------+
 ```
 
 This project replaces the Dreame phone app in that chain. It sends the same HTTPS requests the app would, using reverse-engineered authentication headers and API endpoints.
 
-### Real cloud headers
+### Required cloud headers
 
 Every request to the Dreame cloud requires:
 
@@ -81,6 +77,89 @@ Every request to the Dreame cloud requires:
 | `Dreame-Rlc` | AES-ECB encrypted `region\|lang\|country` (key: `EETjszu*XI5znHsI`) |
 | `Dreame-Auth` | `bearer <access_token>` |
 | `User-Agent` | `Dreame_Smarthome/2.1.9 (iPhone; iOS 18.4.1; Scale/3.00)` |
+
+## Client library
+
+The `dreame_mocker.client` package is a fully async Python library for the Dreame cloud API.
+
+### Usage
+
+```python
+from dreame_mocker.client import DreameCloud
+
+async with DreameCloud(username="you@gmail.com", password="secret") as cloud:
+    await cloud.connect()
+
+    device = await cloud.get_device()       # first device on account
+    status = await device.get_status()       # batch-read state, battery, etc.
+
+    await device.start()                     # start cleaning
+    await device.pause()                     # pause
+    await device.return_to_dock()            # go home
+
+    dreame_map = await device.get_map()      # download & decode map
+    for seg_id, room in dreame_map.rooms.items():
+        print(f"Room {seg_id}: {room.name}")
+```
+
+### Features
+
+- **Token caching** -- tokens are persisted to `~/.config/dreame-mocker/tokens.json` (0o600 permissions) and reused across runs. Auto-refreshes when within 5 minutes of expiry.
+- **Region auto-detection** -- authenticates on any region (default: `eu`), then auto-switches to the correct device region based on your account's `country` field.
+- **Retry with backoff** -- transient failures (connect/timeout/transport errors) are retried with exponential backoff (up to 3 attempts). 401s trigger automatic re-authentication.
+- **Map decoding** -- full pipeline: base64 > AES-256-CBC decrypt > zlib decompress > parse 27-byte header + pixel grid + trailing JSON (rooms, walls, paths, obstacles).
+- **Mock mode** -- when connecting to `localhost`/`127.0.0.1`, cloud-specific headers (Dreame-RLC, Dreame-Meta, etc.) are skipped.
+
+### API reference
+
+**`DreameCloud`** -- main entry point, async context manager.
+
+| Method | Description |
+|--------|-------------|
+| `connect()` | Authenticate and resolve device region |
+| `get_devices()` | List all bound devices (raw dicts) |
+| `get_device(did=None)` | Get a `DreameDevice` wrapper (first device if `did` is None) |
+| `disconnect()` | Close transport |
+
+**`DreameDevice`** -- typed device wrapper.
+
+| Method | Description |
+|--------|-------------|
+| `get_status()` | Batch-read state, battery, error, suction, water, mode, time, area |
+| `get_state()` / `get_battery()` / `get_error()` | Individual property getters |
+| `set_suction_level(level)` / `set_water_volume(vol)` / `set_cleaning_mode(mode)` | Property setters |
+| `start()` / `pause()` / `stop()` / `return_to_dock()` | Cleaning actions |
+| `start_mop_wash()` / `start_mop_dry()` / `start_dust_collection()` | Dock actions |
+| `set_dnd(enabled, start_hour, start_minute, end_hour, end_minute)` | Do Not Disturb config |
+| `get_map()` | Download and decode the current map |
+| `send_action(siid, aiid, params)` | Low-level action RPC |
+| `get_properties(specs)` / `set_properties(specs)` | Low-level property RPC |
+
+**`DreameMap`** -- decoded map data.
+
+| Field / Method | Description |
+|----------------|-------------|
+| `header` | `MapHeader` with dimensions, robot/charger position, pixel size |
+| `pixels` | Raw pixel grid (`width * height` bytes) |
+| `rooms` | `dict[int, RoomInfo]` -- segment ID to room info |
+| `virtual_walls` / `paths` / `obstacles` | Extracted from trailing JSON metadata |
+| `room_id_at(x, y)` | Room/segment ID at pixel coordinate |
+| `is_wall(x, y)` / `is_carpet(x, y)` | Pixel type checks |
+
+### Exceptions
+
+All exceptions inherit from `DreameError`:
+
+| Exception | When |
+|-----------|------|
+| `AuthenticationError` | Login failed or re-auth failed |
+| `TokenExpiredError` | Token expired and refresh failed |
+| `TokenRevokedError` | Token was revoked server-side |
+| `DeviceNotFoundError` | Requested device not on account |
+| `DeviceOfflineError` | Device is offline (cloud error -1 or -9999) |
+| `RateLimitError` | HTTP 429 (has `.retry_after` attribute) |
+| `TransportError` | Network/HTTP errors after retries exhausted |
+| `MapDecodeError` | Map download or decode failure |
 
 ## API endpoints
 
@@ -119,7 +198,7 @@ Returns all devices bound to your account.
 
 Send RPC commands. Supports `get_properties`, `set_properties`, and `action`.
 
-**Example — start cleaning:**
+**Example -- start cleaning:**
 
 ```json
 {
@@ -134,19 +213,15 @@ Send RPC commands. Supports `get_properties`, `set_properties`, and `action`.
 }
 ```
 
-### POST `/dreame-iot-com-10000/device/properties`
-
-Batch property get/set.
-
 ## Properties reference
 
-All properties are addressed by `(siid, piid)`. See `src/dreame_mocker/const.py` for code definitions.
+All properties are addressed by `(siid, piid)`. See `src/dreame_mocker/const.py` for the full list.
 
-### Device state & battery
+### Device state and battery
 
 | Property | SIID | PIID | Values |
 |----------|------|------|--------|
-| State | 2 | 1 | 1=Sweeping, 2=Idle, 3=Paused, 4=Error, 5=Returning, 6=Charging, 7=Mopping, 8=Drying, 9=Washing, 12=Sweep+Mop, 13=Charge Complete |
+| State | 2 | 1 | 1=Sweeping, 2=Idle, 3=Paused, 4=Error, 5=Returning, 6=Charging, 7=Mopping, 8=Drying, 9=Washing, 12=Sweep+Mop, 13=Charge Complete, 20=Mop Washing, 21=Mop Washing Paused |
 | Error | 2 | 2 | 0 = no error |
 | Battery level | 3 | 1 | 0-100 |
 | Charging status | 3 | 2 | true/false |
@@ -192,7 +267,7 @@ All properties are addressed by `(siid, piid)`. See `src/dreame_mocker/const.py`
 | DND end hour | 12 | 4 | 0-23 |
 | DND end minute | 12 | 5 | 0-59 |
 
-### Audio & other
+### Audio and other
 
 | Property | SIID | PIID | Values |
 |----------|------|------|--------|
@@ -212,9 +287,9 @@ All properties are addressed by `(siid, piid)`. See `src/dreame_mocker/const.py`
 | Start drying | 4 | 5 | Start mop pad drying |
 | Auto-empty | 15 | 1 | Trigger dustbin auto-empty |
 
-## Local mock server
+## Mock server
 
-For offline development, run the built-in mock server which simulates the Dreame cloud API locally:
+For offline development, the built-in mock server simulates the Dreame cloud API locally:
 
 ```bash
 uv run dreame-mocker --log-level DEBUG
@@ -222,26 +297,30 @@ uv run dreame-mocker --log-level DEBUG
 
 This starts:
 - HTTP API on `:13267` (same endpoints as the real cloud)
-- MQTT-style TCP status relay on `:19973` (pushes property changes)
+- TCP status relay on `:19973` (pushes property changes)
 
-The mock includes a full device state machine — cleaning cycles, battery drain/charge, dock return, etc. Point your `.env` at `localhost` to use it:
+The mock includes a full device state machine: cleaning cycles with battery drain, dock return, charging, mop wash/dry, and dust collection. Point your `.env` at `localhost` to use it:
 
 ```bash
 DREAME_HOST=localhost
 DREAME_PORT=13267
 ```
 
-### Mock server CLI flags
+### CLI flags
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--host` | string | `0.0.0.0` | Bind address |
 | `--port` | int | `13267` | HTTP API port |
-| `--mqtt-port` | int | `19973` | MQTT status relay port |
+| `--mqtt-port` | int | `19973` | Status relay port |
 | `--device-name` | string | `X50 Ultra Complete` | Virtual device display name |
 | `--device-model` | string | `dreame.vacuum.r2532a` | Model identifier |
 | `--device-id` | string | auto-generated | Device ID |
 | `--log-level` | choice | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+
+### Map support
+
+The mock server generates synthetic map data with rooms, walls, and robot/charger positions. Maps are served through the same endpoints as the real cloud (request map action > get download URL > download encoded map file).
 
 ## Supported X50 Ultra Complete model variants
 
@@ -253,89 +332,6 @@ DREAME_PORT=13267
 - `dreame.vacuum.r2538a`
 - `dreame.vacuum.r2538z`
 
-## Client library
-
-The `dreame_mocker.client` package is a fully async client library for the Dreame cloud API.
-
-### Usage
-
-```python
-from dreame_mocker.client import DreameCloud
-
-async with DreameCloud(username="you@gmail.com", password="secret") as cloud:
-    await cloud.connect()
-
-    device = await cloud.get_device()       # first device on account
-    status = await device.get_status()       # batch-read state, battery, etc.
-
-    await device.start()                     # start cleaning
-    await device.pause()                     # pause
-    await device.return_to_dock()            # go home
-
-    dreame_map = await device.get_map()      # download & decode map
-    for seg_id, room in dreame_map.rooms.items():
-        print(f"Room {seg_id}: {room.name}")
-```
-
-### Features
-
-- **Token caching** — tokens are persisted to `~/.config/dreame-mocker/tokens.json` and reused across runs. Auto-refreshes when within 5 minutes of expiry.
-- **Region auto-detection** — authenticates on any region (default: `eu`), then auto-switches to the correct device region based on your account's `country` field.
-- **Retry with backoff** — transient failures (connect/timeout/5xx) are retried with exponential backoff (up to 3 attempts). 401s trigger automatic re-authentication.
-- **Map decoding** — full pipeline: base64 → AES-256-CBC decrypt → zlib decompress → parse 27-byte header + pixel grid + trailing JSON (rooms, walls, paths, obstacles).
-- **Typed API** — `DreameDevice` exposes typed getters/setters for all common properties and actions.
-
-### API reference
-
-**`DreameCloud`** — main entry point, async context manager.
-
-| Method | Description |
-|--------|-------------|
-| `connect()` | Authenticate and resolve device region |
-| `get_devices()` | List all bound devices (raw dicts) |
-| `get_device(did=None)` | Get a `DreameDevice` wrapper (first device if `did` is None) |
-| `disconnect()` | Close transport |
-
-**`DreameDevice`** — typed device abstraction.
-
-| Method | Description |
-|--------|-------------|
-| `get_status()` | Batch-read state, battery, error, suction, water, mode, time, area |
-| `get_state()` / `get_battery()` / `get_error()` | Individual property getters |
-| `set_suction_level(level)` / `set_water_volume(vol)` / `set_cleaning_mode(mode)` | Property setters |
-| `start()` / `pause()` / `stop()` / `return_to_dock()` | Cleaning actions |
-| `start_mop_wash()` / `start_mop_dry()` / `start_dust_collection()` | Dock actions |
-| `set_dnd(enabled, start_hour, start_minute, end_hour, end_minute)` | Do Not Disturb config |
-| `get_map()` | Download and decode the current map |
-| `send_action(siid, aiid, params)` | Low-level action RPC |
-| `get_properties(specs)` / `set_properties(specs)` | Low-level property RPC |
-
-**`DreameMap`** — decoded map data.
-
-| Field / Method | Description |
-|----------------|-------------|
-| `header` | `MapHeader` with dimensions, robot/charger position, pixel size |
-| `pixels` | Raw pixel grid (`width × height` bytes) |
-| `rooms` | `dict[int, RoomInfo]` — segment ID → room info |
-| `virtual_walls` / `paths` / `obstacles` | Extracted from trailing JSON metadata |
-| `room_id_at(x, y)` | Room/segment ID at pixel coordinate |
-| `is_wall(x, y)` / `is_carpet(x, y)` | Pixel type checks |
-
-### Exceptions
-
-All exceptions inherit from `DreameError`:
-
-| Exception | When |
-|-----------|------|
-| `AuthenticationError` | Login failed or re-auth failed |
-| `TokenExpiredError` | Token expired and refresh failed |
-| `TokenRevokedError` | Token was revoked server-side |
-| `DeviceNotFoundError` | Requested device not on account |
-| `DeviceOfflineError` | Device is offline (cloud error -1 or -9999) |
-| `RateLimitError` | HTTP 429 (has `.retry_after` attribute) |
-| `TransportError` | Network/HTTP errors after retries exhausted |
-| `MapDecodeError` | Map download or decode failure |
-
 ## Development
 
 ```bash
@@ -344,7 +340,7 @@ uv run pyright                        # type check (strict mode, 0 errors)
 uv run dreame-mocker --log-level DEBUG  # run mock server
 uv run python test_client.py          # test against real cloud
 uv run python test_client.py --status # read-only status check
-uv run python test_client.py --map    # fetch and summarise map data
+uv run python test_client.py --map    # fetch and summarize map data
 ```
 
 ## Project structure
@@ -356,19 +352,20 @@ src/dreame_mocker/
   const.py                      # SIID/PIID/AIID mappings, enums, API paths
   client/                       # async cloud client library
     __init__.py                 # public API re-exports
-    auth.py                     # AuthManager — login, token refresh, caching
-    cloud.py                    # DreameCloud — main entry point, region detection
+    auth.py                     # AuthManager -- login, token refresh, caching
+    cloud.py                    # DreameCloud -- main entry point, region detection
     crypto.py                   # Dreame-RLC encryption, password hashing, request signing
-    device.py                   # DreameDevice — typed property/action interface
+    device.py                   # DreameDevice -- typed property/action interface
     errors.py                   # exception hierarchy
     map_decoder.py              # map download, AES decrypt, zlib decompress, binary parse
-    regions.py                  # country→region mapping, URL helpers
-    tokens.py                   # TokenStore — disk-persisted token cache
-    transport.py                # DreameTransport — httpx wrapper with retry/backoff
+    regions.py                  # country-to-region mapping, URL helpers
+    tokens.py                   # TokenStore -- disk-persisted token cache
+    transport.py                # DreameTransport -- httpx wrapper with retry/backoff
   models.py                     # Pydantic request/response models (mock server)
   state.py                      # device state machine (mock server)
   auth.py                       # OAuth2 mock token store (mock server)
   server.py                     # FastAPI mock server
+  map_encoder.py                # synthetic map data generator (mock server)
   mqtt.py                       # TCP status relay (mock server)
   cli.py                        # mock server CLI entry point
 ```
