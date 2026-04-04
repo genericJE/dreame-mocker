@@ -104,9 +104,12 @@ class MapDecoder:
         transport: DreameTransport,
         did: str,
         model: str,
+        req_type: int = 1,
     ) -> DreameMap:
         """Full map retrieval pipeline."""
-        object_name, encryption_key = await MapDecoder.request_map(transport, did)
+        object_name, encryption_key = await MapDecoder.request_map(
+            transport, did, req_type=req_type,
+        )
         url = await MapDecoder.get_download_url(
             transport, object_name, did, model, transport.region,
         )
@@ -117,8 +120,12 @@ class MapDecoder:
     async def request_map(
         transport: DreameTransport,
         did: str,
+        req_type: int = 1,
     ) -> tuple[str, str | None]:
-        """Send REQUEST_MAP action.  Returns ``(object_name, encryption_key | None)``."""
+        """Send REQUEST_MAP action.  Returns ``(object_name, encryption_key | None)``.
+
+        ``req_type`` controls which map variant is requested (1 = current, 2 = saved).
+        """
         siid, aiid = Action.REQUEST_MAP
         _, frame_piid = Property.FRAME_INFO
         obj_siid, obj_piid = Property.OBJECT_NAME
@@ -140,7 +147,7 @@ class MapDecoder:
                             {
                                 "piid": frame_piid,
                                 "value": json.dumps({
-                                    "req_type": 1,
+                                    "req_type": req_type,
                                     "frame_type": "I",
                                     "force_type": 1,
                                 }),
@@ -152,15 +159,25 @@ class MapDecoder:
         )
 
         body: dict[str, Any] = resp.json()
-        result_data: dict[str, Any] = body.get("data", {})
-        result: dict[str, Any] = result_data.get("result", {})
+        raw_data = body.get("data", {})
+        result_data: dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}
+        raw_result = result_data.get("result", {})
+        result: dict[str, Any] = raw_result if isinstance(raw_result, dict) else {}
         out_params: list[dict[str, Any]] = result.get("out", [])
 
+        # Extract object name from response.  The primary location is
+        # piid=3 (OBJECT_NAME), but some models (X50 Ultra) return an empty
+        # piid=3 and put the path in piid=13 with a ``"<type>,<path>"``
+        # format instead.
         object_name = ""
+        piid13_value = ""
         for param in out_params:
-            if param.get("piid") == obj_piid and param.get("siid", obj_siid) == obj_siid:
-                object_name = str(param.get("value", ""))
-                break
+            piid = param.get("piid")
+            val = str(param.get("value", ""))
+            if piid == obj_piid and param.get("siid", obj_siid) == obj_siid and val:
+                object_name = val
+            elif piid == 13 and val:
+                piid13_value = val
 
         if not object_name:
             # Fallback: check if OBJECT_NAME is in a flat result list.
@@ -170,13 +187,25 @@ class MapDecoder:
                     object_name = str(p.get("value", ""))
                     break
 
+        if not object_name and piid13_value:
+            # piid 13 format: "<type>,<cloud_path>" — strip the leading
+            # numeric prefix to get the actual object path.
+            object_name = piid13_value
+
         if not object_name:
             raise MapDecodeError(f"No OBJECT_NAME in REQUEST_MAP response: {body}")
 
         # Format: "path/to/file,encryption_key" or just "path/to/file"
+        # piid 13 variant: "<type>,<path>" where type is a single digit.
         parts = object_name.split(",", 1)
-        file_path = parts[0]
-        enc_key = parts[1] if len(parts) > 1 else None
+        if len(parts) == 2 and parts[0].isdigit() and "/" in parts[1]:
+            # piid 13 format: "1,ali_dreame/..." — the digit is a type
+            # prefix, not an encryption key.
+            file_path = parts[1]
+            enc_key = None
+        else:
+            file_path = parts[0]
+            enc_key = parts[1] if len(parts) > 1 else None
 
         logger.info("Map object: %s (encrypted=%s)", file_path, enc_key is not None)
         return file_path, enc_key
