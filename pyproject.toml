@@ -3,6 +3,8 @@ name = "dreame-mocker"
 version = "0.1.0"
 description = "Python client that mocks the Dreame mobile app, enabling Home Assistant automation for the X50 Ultra Complete"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.13"
 dependencies = [
     "httpx>=0.27.0",
