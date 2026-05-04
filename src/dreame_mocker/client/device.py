@@ -172,6 +172,33 @@ class DreameDevice:
             (*Property.DND_END_MINUTE, end_minute),
         ])
 
+    async def set_self_clean(self, enabled: bool) -> None:
+        """Toggle the dock's automatic mid/post-cleaning mop wash.
+
+        Set to False for a pure-dry run when mop pads are still
+        physically attached — equivalent to the official Dreame app's
+        Self-Clean toggle.
+        """
+        await self._set_prop(Property.SELF_CLEAN, 1 if enabled else 0)
+
+    async def set_auto_water_refilling(self, enabled: bool) -> None:
+        """Toggle automatic refill of the clean-water tank from base."""
+        await self._set_prop(Property.AUTO_WATER_REFILLING, 1 if enabled else 0)
+
+    async def set_auto_mount_mop(self, enabled: bool) -> None:
+        """Toggle automatic attachment of mop pads at cycle start."""
+        await self._set_prop(Property.AUTO_MOUNT_MOP, 1 if enabled else 0)
+
+    async def set_intelligent_recognition(self, enabled: bool) -> None:
+        """Toggle smart carpet/zone recognition during cleaning."""
+        await self._set_prop(
+            Property.INTELLIGENT_RECOGNITION, 1 if enabled else 0,
+        )
+
+    async def set_mop_wash_level(self, level: int) -> None:
+        """Set wash intensity. 0=water-saving, 1=daily, 2=deep."""
+        await self._set_prop(Property.MOP_WASH_LEVEL, level)
+
     # ── Actions ───────────────────────────────────────────────────────
 
     async def start(self) -> None:

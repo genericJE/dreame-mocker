@@ -47,6 +47,18 @@ class Property:
     SELF_WASH_BASE_STATUS = (4, 25)
     CLEANING_TIME = (4, 2)
     CLEANING_AREA = (4, 3)
+    # Wash / mop preferences — persistent device-side settings the
+    # Dreame app exposes. Set SELF_CLEAN=0 to skip the dock's auto
+    # mop wash (needed for a pure-dry run on a robot with mop pads
+    # attached). Last two are read-only base sensors.
+    SELF_CLEAN = (4, 34)               # bool — auto wash mid/post cleaning
+    MOP_WASH_LEVEL = (4, 45)           # 0=water-saving, 1=daily, 2=deep
+    AUTO_MOUNT_MOP = (4, 46)           # bool — auto attach mop pads at start
+    INTELLIGENT_RECOGNITION = (4, 49)  # bool — smart carpet detection
+    AUTO_SWITCH_SETTINGS = (4, 50)     # JSON dict (LessColl, FillinLight, AutoDry, StainIdentify, CleanType)
+    AUTO_WATER_REFILLING = (4, 51)     # bool — auto refill clean-water tank
+    MOP_IN_STATION = (4, 52)           # bool, RO — pads detected at base
+    MOP_PAD_INSTALLED = (4, 53)        # bool, RO — pads currently mounted
     DUST_COLLECTION = (15, 3)
     AUTO_EMPTY_STATUS = (15, 5)
     MAIN_BRUSH_TIME_LEFT = (9, 1)

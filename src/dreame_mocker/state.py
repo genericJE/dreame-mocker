@@ -48,11 +48,14 @@ class VacuumDevice:
         self.region = "eu"
         self.firmware_version = "4.5.2_1132"
 
-        # Realistic-mode flags. When `offline_after_return` is True, the
-        # post-cleaning chain emits RETURNING briefly then the device drops
-        # off the cloud (RPC failures) for `offline_duration_s` seconds and
-        # comes back online directly in CHARGE_COMPLETE — matching what the
-        # X50 actually emits via the cloud (no CHARGING / DRYING observed).
+        # Wi-Fi-cycled-mode flags. When `offline_after_return` is True,
+        # the post-cleaning chain emits RETURNING briefly, then the device
+        # drops off the cloud (RPC failures) for `offline_duration_s`
+        # seconds and reappears directly in CHARGE_COMPLETE — modelling
+        # the deployment shape where Wi-Fi is cut between phases. With
+        # the flag off, the simulation emits the full RETURNING >
+        # CHARGING > CHARGE_COMPLETE chain, which is what a real X50
+        # emits when Wi-Fi is held on through the cycle.
         self.offline_after_return: bool = offline_after_return
         self.offline_duration_s: float = offline_duration_s
         self._offline_until: float = 0.0
@@ -71,6 +74,17 @@ class VacuumDevice:
             Property.SELF_WASH_BASE_STATUS: 0,
             Property.CLEANING_TIME: 0,
             Property.CLEANING_AREA: 0,
+            Property.SELF_CLEAN: 1,
+            Property.MOP_WASH_LEVEL: 1,
+            Property.AUTO_MOUNT_MOP: 1,
+            Property.INTELLIGENT_RECOGNITION: 1,
+            Property.AUTO_SWITCH_SETTINGS: (
+                '{"LessColl":0,"FillinLight":1,"AutoDry":1,'
+                '"StainIdentify":1,"CleanType":0}'
+            ),
+            Property.AUTO_WATER_REFILLING: 1,
+            Property.MOP_IN_STATION: True,
+            Property.MOP_PAD_INSTALLED: True,
             Property.DUST_COLLECTION: True,
             Property.AUTO_EMPTY_STATUS: 0,
             Property.MAIN_BRUSH_TIME_LEFT: 18000,
