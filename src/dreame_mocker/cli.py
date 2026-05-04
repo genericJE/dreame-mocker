@@ -45,6 +45,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--log-level", default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
     )
+    parser.add_argument(
+        "--offline-after-return", action="store_true",
+        help=(
+            "Wi-Fi-cycled deployment shape: after RETURNING the simulated "
+            "device drops off the cloud (RPC returns code=-1) for "
+            "--offline-duration seconds, then reappears as CHARGE_COMPLETE "
+            "with CHARGING and DRYING never visible to the client. Without "
+            "this flag, the simulation emits the full RETURNING > CHARGING "
+            "> CHARGE_COMPLETE chain — which matches what a real X50 emits "
+            "when its Wi-Fi is held on through the whole cycle."
+        ),
+    )
+    parser.add_argument(
+        "--offline-duration", type=float, default=60.0,
+        help=(
+            "Seconds the simulated device stays offline after starting "
+            "return (default: 60). Only meaningful with --offline-after-return."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -63,8 +82,16 @@ def main(argv: list[str] | None = None) -> None:
         did=args.device_id,
         name=args.device_name,
         model=args.device_model,
+        offline_after_return=args.offline_after_return,
+        offline_duration_s=args.offline_duration,
     )
     registry.add(device)
+    if args.offline_after_return:
+        logger.info(
+            "Realistic offline mode: device will drop off cloud for %.1fs "
+            "after starting return",
+            args.offline_duration,
+        )
 
     token_store = TokenStore()
     relay = StatusRelay(host=args.host, port=args.mqtt_port)

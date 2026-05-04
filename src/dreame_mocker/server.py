@@ -98,6 +98,16 @@ def create_app(
         if not device:
             raise HTTPException(404, f"Device {did} not found")
 
+        if device.is_offline:
+            # Mimic the real cloud: HTTP 200 with a device-offline envelope
+            # code. The client surfaces this as DeviceOfflineError.
+            return JSONResponse({
+                "code": -1,
+                "data": {"id": data.get("id", 1)},
+                "msg": "device offline",
+                "success": False,
+            })
+
         result = await _handle_rpc(device, method, params)
         return JSONResponse({
             "code": 0,

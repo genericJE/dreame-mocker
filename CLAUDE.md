@@ -2,26 +2,54 @@
 
 ## Directives
 
-- **NEVER read, display, or access `.env`** — it contains user credentials. Do not use the Read tool, Bash cat/head/tail, or any other method to view its contents.
-- `CLAUDE.local.md` contains user-specific info (device ID, email, account country, region routing). It is gitignored. Read it when needed for debugging but never commit it.
-- **Keep `README.md` up-to-date** — whenever you add features, change APIs, fix bugs, or discover new information, update the README to reflect the current state of the project.
-- **Keep this file (`CLAUDE.md`) up-to-date** — record all research findings, API discoveries, architectural decisions, and technical explanations here so knowledge persists across sessions.
+- **NEVER read, display, or access `.env`** -- it contains user credentials. Do not use the Read tool, Bash cat/head/tail, or any other method to view its contents.
+- `CLAUDE.local.md` contains user-specific info (device ID, email, account country, region routing, HA access, GitHub setup, HACS deployment workflow). It is gitignored. Read it when needed for debugging but never commit it.
+- **Keep `README.md` up-to-date** -- whenever you add features, change APIs, fix bugs, or discover new information, update the README to reflect the current state of the project.
+- **Keep this file (`CLAUDE.md`) up-to-date** -- record all research findings, API discoveries, architectural decisions, and technical explanations here so knowledge persists across sessions.
 
 ## Project context
 
 - This is a Python project managed with `uv` (Python 3.13)
-- Type checking uses `pyright` in strict mode (see `pyrightconfig.json`) — includes both `src/dreame_mocker/` and `test_client.py`
-- This project mocks the **Dreame mobile app** (not the cloud server) — it acts as a client that talks to the real Dreame cloud API to control a Dreame X50 Ultra Complete robot vacuum
+- Type checking uses `pyright` in strict mode (see `pyrightconfig.json`) -- includes both `src/dreame_mocker/` and `test_client.py`
+- This project mocks the **Dreame mobile app** (not the cloud server) -- it acts as a client that talks to the real Dreame cloud API to control a Dreame X50 Ultra Complete robot vacuum
 - The project also includes a local mock server for offline development/testing
-- The X50 Ultra Complete is **cloud-only** — there is no local control protocol, no local API, no way to bypass the cloud
+- The X50 Ultra Complete is **cloud-only** -- there is no local control protocol, no local API, no way to bypass the cloud
+
+## Related project: ha-dreame-cloud
+
+The Home Assistant integration lives in a separate repo at `/Users/je/Documents/JE/Python/ha-dreame-cloud/` (GitHub: `genericJE/ha-dreame-cloud`). It's called **"Dreame Cloud Vacuum"** in HACS/HA UI, with domain `dreame_cloud`. Current version: `v0.1.4`.
+
+The HA integration depends on this repo's client library (`dreame_mocker.client`) via `git+https://github.com/genericJE/dreame-mocker.git` in its `manifest.json`. Changes to the client library must be pushed to GitHub before the HA integration can pick them up via HACS redownload.
+
+### HA integration architecture
+
+```
+Config Flow > DreameCloud.connect() > auth + device discovery
+     |
+Coordinator (30s poll) > single get_properties() call (14 properties)
+     |                 > DreameDevice.get_map() (periodic: 5s cleaning, 5min idle)
+     |
+Entities < DreameCloudData (status + map + consumables + dnd + volume)
+```
+
+### HA entities
+
+- **Vacuum**: start/pause/stop/return, fan speed, clean_segment service, send_command
+- **Camera**: map rendering with numpy/PIL, configurable rotation and flip
+- **Sensors**: battery, cleaning time/area, state, consumable life (4x, disabled by default)
+- **Controls**: water volume select, cleaning mode select, DND switch, volume number, mop wash/dry/dust collection buttons, charging binary sensor
+- **Configuration**: map rotation select (0/90/180/270), map flip horizontal switch, map flip vertical switch
 
 ## Commands
 
-- `uv run python test_client.py` — run the real-cloud test client (password auth by default)
-- `uv run python test_client.py --email-code` — email code auth (interactive)
-- `uv run python test_client.py --code 123456` — email code auth (non-interactive)
-- `uv run dreame-mocker` — run the local mock server
-- `uv run pyright` — type check (must be 0 errors)
+- `uv run python test_client.py` -- run the real-cloud test client (password auth by default)
+- `uv run python test_client.py --email-code` -- email code auth (interactive)
+- `uv run python test_client.py --code 123456` -- email code auth (non-interactive)
+- `uv run python test_client.py --status` -- read-only status check
+- `uv run python test_client.py --map` -- fetch and summarize map data
+- `uv run dreame-mocker` -- run the local mock server
+- `uv run dreame-mocker --log-level DEBUG` -- run mock server with debug logging
+- `uv run pyright` -- type check (must be 0 errors)
 
 ## Dreame cloud API research
 
@@ -51,7 +79,7 @@
 - Endpoint: `POST /dreame-auth/oauth/token`
 - Content-Type: `application/x-www-form-urlencoded`
 - Password hashing: `MD5(password + "RAylYC%fmSKp7%Tq")`
-- Works with Google/Apple-linked accounts **only if a Dreame password has been set** (Dreame app → Settings → Account & Security → Password)
+- Works with Google/Apple-linked accounts **only if a Dreame password has been set** (Dreame app > Settings > Account & Security > Password)
 
 #### Email code login (`grant_type=email`)
 
@@ -69,7 +97,7 @@ Two-step flow:
 
 #### Region auto-detection
 
-The token response includes `country` (e.g. `"US"`). Devices live on the region matching the account country, NOT necessarily the auth endpoint region. The client auto-switches: auth on `eu.iot.dreame.tech` → devices on `us.iot.dreame.tech`.
+The token response includes `country` (e.g. `"US"`). Devices live on the region matching the account country, NOT necessarily the auth endpoint region. The client auto-switches: auth on `eu.iot.dreame.tech` > devices on `us.iot.dreame.tech`.
 
 ### API endpoints
 
@@ -154,7 +182,7 @@ Device fields include: `did`, `model`, `subModel`, `ver`, `customName`, `mac`, `
 
 #### Map data encoding pipeline
 
-1. URL-safe Base64 substitution: `-` → `+`, `_` → `/`
+1. URL-safe Base64 substitution: `-` > `+`, `_` > `/`
 2. Base64 decode
 3. AES-256-CBC decryption (if encryption key provided): key = `SHA256(encryption_key).hex()[0:32]`, IV is model-specific
 4. Zlib decompression
@@ -162,7 +190,7 @@ Device fields include: `did`, `model`, `subModel`, `ver`, `customName`, `mac`, `
 #### Map binary format
 
 - **Header**: 27 bytes (little-endian): map_id, frame_id, frame_type, robot_x/y/angle, charger_x/y/angle, pixel_size, width, height, left, top
-- **Pixel data**: `width × height` bytes. Bits 0-5 = room ID, bit 6 = carpet, bit 7 = wall
+- **Pixel data**: `width * height` bytes. Bits 0-5 = room ID, bit 6 = carpet, bit 7 = wall
 - **Trailing JSON**: room info (`seg_inf`), cleaning settings (`cleanset`), virtual walls (`vw`), path (`tr`), obstacles (`ai_obstacle`)
 
 #### Room identification
@@ -202,39 +230,92 @@ The client library is a fully async Python library in `src/dreame_mocker/client/
 | `device.py` | `DreameDevice` | Typed property getters/setters, actions, map retrieval |
 | `auth.py` | `AuthManager` | Password/email-code login, token refresh, thread-safe with `asyncio.Lock` |
 | `transport.py` | `DreameTransport` | `httpx.AsyncClient` wrapper, injects headers, tenacity retry on transient failures |
-| `map_decoder.py` | `MapDecoder` | Full map pipeline: request → download → base64 → AES → zlib → parse |
+| `map_decoder.py` | `MapDecoder` | Full map pipeline: request > download > base64 > AES > zlib > parse |
 | `tokens.py` | `TokenStore` | Disk-persisted token cache at `~/.config/dreame-mocker/tokens.json` (0o600) |
-| `crypto.py` | — | `make_dreame_rlc()`, `hash_password()`, `make_request_sign()` |
-| `regions.py` | — | Country→region mapping, `base_url()`, `region_from_host()` |
-| `errors.py` | — | Exception hierarchy rooted at `DreameError` |
-| `__init__.py` | — | Public re-exports |
+| `crypto.py` | -- | `make_dreame_rlc()`, `hash_password()`, `make_request_sign()` |
+| `regions.py` | -- | Country-to-region mapping, `base_url()`, `region_from_host()` |
+| `errors.py` | -- | Exception hierarchy rooted at `DreameError` |
+| `__init__.py` | -- | Public re-exports |
 
 ### Key design decisions
 
 - **Token auto-refresh**: `auth.ensure_valid_token()` is called before every API request. If the token is within 5 minutes of expiry, it refreshes automatically.
-- **Retry strategy**: Tenacity with 3 attempts, exponential backoff 1–30s with jitter, on `ConnectError`/`ReadTimeout`/`WriteTimeout`/`PoolTimeout`/`TransportError`. 401s trigger re-auth (not retry). 429s raise `RateLimitError`.
+- **Retry strategy**: Tenacity with 3 attempts, exponential backoff 1-30s with jitter, on `ConnectError`/`ReadTimeout`/`WriteTimeout`/`PoolTimeout`/`TransportError`. 401s trigger re-auth (not retry). 429s raise `RateLimitError`.
 - **Region switching**: `transport.switch_region()` closes the old `httpx.AsyncClient` and creates a new one pointed at the correct host.
 - **Mock mode**: When `host` is `localhost`/`127.0.0.1`, cloud headers (Dreame-RLC, Dreame-Meta, etc.) are skipped.
 - **`_rpc()` auto-retry on 401**: The `DreameDevice._rpc()` method retries once on HTTP 401 after re-authenticating.
+- **Reconnect safety**: `connect()` always closes and reopens the transport to avoid stale connections.
+- **Token file permissions**: Written atomically with `os.open(O_CREAT, 0o600)` to avoid permission race conditions.
+
+## Mock server architecture
+
+| Module | Responsibility |
+|--------|----------------|
+| `server.py` | FastAPI app with all cloud API endpoints |
+| `state.py` | `VacuumDevice` state machine + `DeviceRegistry` |
+| `auth.py` | Mock OAuth2 token store |
+| `models.py` | Pydantic request/response models |
+| `map_encoder.py` | Synthetic map data generator |
+| `mqtt.py` | TCP status relay (pushes property changes) |
+| `cli.py` | CLI entry point with argparse |
+
+The mock server simulates: cleaning cycles with battery drain, dock return with charging, mop wash/dry, dust collection, and map generation. Property changes are broadcast to connected TCP clients via the status relay.
+
+### Realistic offline mode
+
+`VacuumDevice(offline_after_return=True, offline_duration_s=60.0)` (or the `--offline-after-return` / `--offline-duration` CLI flags) simulates a setup where the device's Wi‑Fi is cut after `RETURNING` — replacing the default chain `RETURNING > CHARGING > CHARGE_COMPLETE` with `RETURNING > [device drops off cloud for offline_duration_s] > CHARGE_COMPLETE`. While offline, the server's `send_command` endpoint returns `{"code": -1, "msg": "device offline"}` at HTTP 200, which the client surfaces as `DeviceOfflineError`. The server checks `device.is_offline` (a `time.monotonic()`-backed flag set by `go_offline(duration)`).
+
+The default happy-path chain is preserved when the flag is omitted, so existing tests don't change.
+
+**This is a Wi‑Fi-cycled scenario, not a firmware limitation.** When Wi‑Fi is held on through the entire cycle, the real X50 emits the full `RETURNING > CHARGING > Washing > Drying > CHARGE_COMPLETE` chain just fine — empirically verified 2026-05-04. The reason production histories often show the truncated sequence is that many setups (including this user's) cycle Wi‑Fi off when the robot finishes, so the post-return states never reach HA. Use this flag to test automations whose triggers must work in such Wi‑Fi-cycled deployments.
+
+### States observed in practice
+
+The full `STATES` mapping in `const.py` lists what the firmware can emit. **All non-error states reach the cloud client provided the device's Wi‑Fi is on while the state is active.** The reason production histories often look truncated is operational, not protocol-level.
+
+Two empirically verified scenarios on a real X50 Ultra Complete (`dreame.vacuum.r2532h`, US account):
+
+**Wi‑Fi held on through the cycle (2026-05-04 manual test):**
+
+```
+Charge Complete > Washing > Sweep+Mop > Returning > Charging > Washing > Drying
+```
+
+All of `Returning` (5), `Charging` (6), and `Drying` (8) emit and are recorded by the HA coordinator.
+
+**Wi‑Fi cycled off when "done" (this user's normal operation):**
+
+```
+Charge Complete > [Mop Washing >] Sweep+Mop > [device drops off cloud] > Offline (synthetic)
+```
+
+The cloud poll goes silent before `Returning` / `Charging` / `Drying` emit, because the device or the user's automation has already cut Wi‑Fi. `Offline` here is synthesized by the HA coordinator after the unreachability threshold — it's not a state the firmware reported.
+
+States that depend on user actions (`Idle`, `Paused`, `Error`) or non-default cleaning modes (`Sweeping`, `Mopping`) are reachable via the cloud just like the rest, but won't show up in histories that don't exercise them.
+
+Implication for HA automations: prefer `to: Drying` for "robot finished active cleaning" — accurate when Wi‑Fi is on. For setups that cycle Wi‑Fi off before `Drying` would emit, fall back to the synthetic `Offline` transition (`from: [Sweep+Mop, Sweeping, Mopping]` `to: Offline`) the coordinator generates after the threshold. Don't trigger on `Charge Complete` for end-of-cycle detection — it fires both before a clean (idle on dock) and after, so it's ambiguous.
 
 ## Architectural decisions
 
 - **Password login as default**: Email code login creates a separate identity from Google/Apple OAuth-linked accounts, so devices don't appear. Password login authenticates to the same account.
 - **Region auto-detection**: Auth can happen on any region, but device APIs must use the region matching the account's `country` field.
-- **Mock server kept**: `mqtt.py` and the mock server are useful for offline development even though the real robot is cloud-only. The mock server simulates the Dreame cloud API locally with a state machine.
-
+- **Mock server kept**: The mock server is useful for offline development even though the real robot is cloud-only. The mock server simulates the Dreame cloud API locally with a state machine.
+- **Config flow unique ID**: Uses just the email for cloud entries, `email_hostname` for mock entries. Previously used `email_cloud` suffix which caused duplicate config entry bugs.
+- **HA coordinator single RPC call**: All 14 device properties (state, battery, error, suction, water, mode, time, area, consumables, dnd, volume) are fetched in a single `get_properties` call instead of multiple calls.
+- **Map orientation as CONFIG entities**: Rotation and flip controls are `EntityCategory.CONFIG` so they appear in the Configuration section of the device page, separate from main controls. The camera entity listens for option changes via `config_entry.add_update_listener`.
 
 ## Known limitations
 
-- The X50 Ultra Complete has **no local control** — all commands require cloud connectivity
+- The X50 Ultra Complete has **no local control** -- all commands require cloud connectivity
 - No known root method for the X50 Ultra to enable local MQTT yet
 - Valetudo does not support the X50 Ultra Complete
-- Password auth has a rate limit — too many wrong attempts will lock the account
+- Password auth has a rate limit -- too many wrong attempts will lock the account
 - Map data AES-256-CBC decryption requires a model-specific IV (stored in Tasshack's `DEVICE_MAP_KEY` constant)
+- HA integration has 8 pre-existing pyright errors from HA framework type issues (config_entry nullability), not bugs
 
 ## Open-source references
 
-- [Tasshack/dreame-vacuum](https://github.com/Tasshack/dreame-vacuum) — HA integration, uses Xiaomi cloud, has map decoding
-- [TA2k/ioBroker.dreame](https://github.com/TA2k/ioBroker.dreame) — uses Dreame-native API, password login only
-- [spayrosam/ioBroker.dreamehome](https://github.com/spayrosam/ioBroker.dreamehome) — Dreame-native, password only
-- [pgrootkop-cmyk/com.dreame.vacuum.cloud](https://github.com/pgrootkop-cmyk/com.dreame.vacuum.cloud) — Homey app, password only
+- [Tasshack/dreame-vacuum](https://github.com/Tasshack/dreame-vacuum) -- HA integration, uses Xiaomi cloud, has map decoding
+- [TA2k/ioBroker.dreame](https://github.com/TA2k/ioBroker.dreame) -- uses Dreame-native API, password login only
+- [spayrosam/ioBroker.dreamehome](https://github.com/spayrosam/ioBroker.dreamehome) -- Dreame-native, password only
+- [pgrootkop-cmyk/com.dreame.vacuum.cloud](https://github.com/pgrootkop-cmyk/com.dreame.vacuum.cloud) -- Homey app, password only

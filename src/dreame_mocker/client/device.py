@@ -204,10 +204,13 @@ class DreameDevice:
 
     # ── Map ───────────────────────────────────────────────────────────
 
-    async def get_map(self) -> DreameMap:
-        """Request, download, and decode the current map."""
+    async def get_map(self, req_type: int = 1) -> DreameMap:
+        """Request, download, and decode a map.
+
+        ``req_type`` selects the map variant: 1 = current, 2 = saved.
+        """
         return await MapDecoder.request_and_decode(
-            self._transport, self.did, self.model,
+            self._transport, self.did, self.model, req_type=req_type,
         )
 
     # ── Low-level RPC ─────────────────────────────────────────────────

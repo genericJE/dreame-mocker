@@ -35,6 +35,9 @@ class VacuumDevice:
         did: str | None = None,
         name: str = "X50 Ultra Complete",
         model: str = DEFAULT_MODEL,
+        *,
+        offline_after_return: bool = False,
+        offline_duration_s: float = 60.0,
     ) -> None:
         self.did = did or str(uuid.uuid4().int)[:10]
         self.name = name
@@ -44,6 +47,15 @@ class VacuumDevice:
         self.localip = "192.168.1.100"
         self.region = "eu"
         self.firmware_version = "4.5.2_1132"
+
+        # Realistic-mode flags. When `offline_after_return` is True, the
+        # post-cleaning chain emits RETURNING briefly then the device drops
+        # off the cloud (RPC failures) for `offline_duration_s` seconds and
+        # comes back online directly in CHARGE_COMPLETE — matching what the
+        # X50 actually emits via the cloud (no CHARGING / DRYING observed).
+        self.offline_after_return: bool = offline_after_return
+        self.offline_duration_s: float = offline_duration_s
+        self._offline_until: float = 0.0
 
         self._on_property_change: list[PropertyChangeCallback] = []
 
@@ -83,6 +95,19 @@ class VacuumDevice:
 
     def on_property_change(self, callback: PropertyChangeCallback) -> None:
         self._on_property_change.append(callback)
+
+    @property
+    def is_offline(self) -> bool:
+        """True while the device is simulated as unreachable from the cloud."""
+        return self._offline_until > time.monotonic()
+
+    def go_offline(self, duration_s: float) -> None:
+        """Mark the device unreachable for `duration_s` seconds."""
+        self._offline_until = time.monotonic() + duration_s
+
+    def come_online(self) -> None:
+        """Clear the offline flag immediately."""
+        self._offline_until = 0.0
 
     def _notify(self, key: tuple[int, int], value: Any) -> None:
         for cb in self._on_property_change:
@@ -202,15 +227,43 @@ class VacuumDevice:
         return {"code": 0}
 
     async def _simulate_return(self) -> None:
-        """Simulate the return trip, then start charging."""
+        """Simulate the return trip, then start charging.
+
+        In realistic mode (`offline_after_return=True`), CHARGING/CHARGE
+        are skipped entirely — the device drops off the cloud and reappears
+        as CHARGE_COMPLETE, mirroring what the real X50 emits.
+        """
         try:
             await asyncio.sleep(3)
+            if self.offline_after_return:
+                await self._simulate_offline_then_complete()
+                return
             self._set_state(DeviceState.CHARGING)
             self._properties[Property.CHARGING_STATUS] = True
             self._notify(Property.CHARGING_STATUS, True)
             await self._simulate_charging()
         except asyncio.CancelledError:
             pass
+
+    async def _simulate_offline_then_complete(self) -> None:
+        """Drop off the cloud for `offline_duration_s`, then reappear as CHARGE_COMPLETE.
+
+        Models a Wi‑Fi-cycled deployment: the firmware still goes through
+        CHARGING / DRYING, but the device's Wi‑Fi is off while it does, so
+        the cloud client never sees those states. Next visible state is
+        CHARGE_COMPLETE when Wi‑Fi comes back. With Wi‑Fi held on, a real
+        X50 emits the full RETURNING > CHARGING > DRYING chain.
+        """
+        self.go_offline(self.offline_duration_s)
+        try:
+            await asyncio.sleep(self.offline_duration_s)
+        finally:
+            self.come_online()
+        self._properties[Property.BATTERY_LEVEL] = 100
+        self._notify(Property.BATTERY_LEVEL, 100)
+        self._properties[Property.CHARGING_STATUS] = True
+        self._notify(Property.CHARGING_STATUS, True)
+        self._set_state(DeviceState.CHARGE_COMPLETE)
 
     async def _simulate_charging(self) -> None:
         try:

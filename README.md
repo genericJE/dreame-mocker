@@ -226,6 +226,34 @@ All properties are addressed by `(siid, piid)`. See `src/dreame_mocker/const.py`
 | Battery level | 3 | 1 | 0-100 |
 | Charging status | 3 | 2 | true/false |
 
+#### States observed in practice (X50 Ultra Complete via cloud)
+
+The full state list above is what the firmware can emit. **All non-error states reach the cloud client provided the device's Wi‑Fi is on while the state is active.** Production histories often show only a subset because the device — or a user automation — cuts Wi‑Fi between phases.
+
+Confirmed via two scenarios on a real X50 Ultra Complete (`dreame.vacuum.r2532h`):
+
+**Wi‑Fi held on through the cycle (2026-05-04 manual end-to-end test):**
+
+```
+Charge Complete > Washing > Sweep+Mop > Returning > Charging > Washing > Drying
+```
+
+All of `Returning` (5), `Charging` (6), and `Drying` (8) emit and reach HA. The full firmware state machine is observable; nothing is hidden by the protocol.
+
+**Wi‑Fi cycled off when "done" (this user's normal operation):**
+
+```
+Charge Complete > [Mop Washing >] Sweep+Mop > [device drops off cloud]
+```
+
+The cloud poll goes silent before `Returning` / `Charging` / `Drying` emit, because the device or the user's automation has already cut Wi‑Fi. The HA integration then synthesizes an `Offline` value after an unreachability threshold — this is **not** a state the firmware reported, just a stand-in for "we lost the device."
+
+Cleaning-mode-conditional states (`Sweeping`, `Mopping` — the device emits these instead of `Sweep+Mop` when the mode is set to pure-sweep or pure-mop), and user-action-conditional states (`Idle`, `Paused`, `Error`), reach the cloud just like the rest, but only when the corresponding configuration or event occurs.
+
+**Implication for HA / automations.** Prefer `to: Drying` to detect "robot finished active cleaning" — accurate and unambiguous when Wi‑Fi is held on through the cycle. For setups that cut Wi‑Fi before `Drying` would emit, fall back to a transition into the synthetic `Offline` value (the HA integration emits this past the unreachability threshold). Don't use `Charge Complete` as an end-of-cycle trigger — it fires both before and after a clean.
+
+The mock server has an opt-in `--offline-after-return` flag that simulates the Wi‑Fi-cycled scenario, so automations targeting that deployment shape can be exercised against the mock — see [Mock server](#mock-server) below.
+
 ### Cleaning settings
 
 | Property | SIID | PIID | Values |
@@ -306,6 +334,20 @@ DREAME_HOST=localhost
 DREAME_PORT=13267
 ```
 
+### Wi‑Fi-cycled mode (`--offline-after-return`)
+
+The default mock cycle (`SWEEP_AND_MOP > RETURNING > CHARGING > CHARGE_COMPLETE`, all online) is what a real X50 emits when Wi‑Fi is held on through the whole cycle — empirically verified, see [States observed in practice](#states-observed-in-practice-x50-ultra-complete-via-cloud). Many production setups, however, cut Wi‑Fi as soon as the robot is "done", so HA never sees `RETURNING` / `CHARGING` / `DRYING` in those deployments.
+
+Pass `--offline-after-return` to simulate the Wi‑Fi-cycled deployment shape:
+
+```bash
+uv run dreame-mocker --offline-after-return --offline-duration 60
+```
+
+After cleaning finishes the device briefly enters `RETURNING`, then RPC calls return `code=-1` (which the client surfaces as `DeviceOfflineError`) for `--offline-duration` seconds. When the offline window ends, the device reappears in `CHARGE_COMPLETE` directly — `CHARGING` and `DRYING` are skipped because the simulated Wi‑Fi was off while the firmware was in those states. Use this mode to test "robot done" automations targeting Wi‑Fi-cycled deployments before deploying them against the real cloud in such a setup.
+
+The default Wi‑Fi-on cycle is preserved when the flag is omitted, so existing tests don't change.
+
 ### CLI flags
 
 | Flag | Type | Default | Description |
@@ -317,6 +359,8 @@ DREAME_PORT=13267
 | `--device-model` | string | `dreame.vacuum.r2532a` | Model identifier |
 | `--device-id` | string | auto-generated | Device ID |
 | `--log-level` | choice | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+| `--offline-after-return` | flag | off | Simulate Wi-Fi-cycled deployment: drop off after RETURNING, hide CHARGING / DRYING, reappear as CHARGE_COMPLETE |
+| `--offline-duration` | float | `60.0` | Seconds the simulated device stays offline (only with `--offline-after-return`) |
 
 ### Map support
 
