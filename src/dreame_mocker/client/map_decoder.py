@@ -11,11 +11,13 @@ Decode pipeline: base64 -> AES-256-CBC decrypt (optional) -> zlib decompress
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import logging
 import struct
 import zlib
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -67,7 +69,14 @@ class RoomInfo:
 
 @dataclass
 class DreameMap:
-    """Fully decoded map data from the robot."""
+    """Fully decoded map data from the robot.
+
+    Note on segment IDs: the live pixel grid (``pixels``) uses
+    SLAM-internal segment IDs allocated by the firmware. These are not
+    the same as the user-facing IDs in the saved map (``rism``), which
+    is what ``cleanset`` and the ``clean_segment`` action expect. Use
+    ``live_to_rism_segment_map()`` to translate.
+    """
 
     header: MapHeader
     pixels: bytes  # raw pixel grid (width * height bytes)
@@ -76,6 +85,7 @@ class DreameMap:
     paths: list[list[int]] = field(default_factory=lambda: list[list[int]]())
     obstacles: list[dict[str, Any]] = field(default_factory=lambda: list[dict[str, Any]]())
     raw_metadata: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
+    rism: DreameMap | None = None
 
     def room_id_at(self, x: int, y: int) -> int:
         """Return the room/segment ID at pixel (x, y), or 0 if outside."""
@@ -94,6 +104,49 @@ class DreameMap:
         if 0 <= x < self.header.width and 0 <= y < self.header.height:
             return bool(self.pixels[y * self.header.width + x] & 0x40)
         return False
+
+    def live_to_rism_segment_map(self) -> dict[int, int]:
+        """Translate live pixel-grid segment IDs to rism (saved-map) IDs.
+
+        For each non-wall pixel in the live grid, samples the rism pixel
+        at the same vacuum coordinates and votes its segment ID toward
+        the live segment. Returns the most-voted rism ID per live ID.
+
+        Returns ``{}`` when no rism saved map is attached.
+        """
+        if self.rism is None:
+            return {}
+
+        rh = self.rism.header
+        rism_pixels = self.rism.pixels
+        votes: dict[int, Counter[int]] = defaultdict(Counter)
+
+        for py in range(self.header.height):
+            row = py * self.header.width
+            vy = py * self.header.pixel_size + self.header.top
+            rpy = round((vy - rh.top) / rh.pixel_size)
+            if not (0 <= rpy < rh.height):
+                continue
+            rrow = rpy * rh.width
+            for px in range(self.header.width):
+                byte = self.pixels[row + px]
+                if byte & 0x80:
+                    continue
+                live_seg = byte & 0x3F
+                if live_seg == 0:
+                    continue
+                vx = px * self.header.pixel_size + self.header.left
+                rpx = round((vx - rh.left) / rh.pixel_size)
+                if not (0 <= rpx < rh.width):
+                    continue
+                rism_byte = rism_pixels[rrow + rpx]
+                if rism_byte & 0x80:
+                    continue
+                rism_seg = rism_byte & 0x3F
+                if rism_seg:
+                    votes[live_seg][rism_seg] += 1
+
+        return {live: c.most_common(1)[0][0] for live, c in votes.items()}
 
 
 class MapDecoder:
@@ -295,7 +348,33 @@ class MapDecoder:
             raise MapDecodeError(f"AES decryption failed: {exc}") from exc
 
     @staticmethod
-    def _parse(data: bytes) -> DreameMap:
+    def _decode_rism(rism_b64: str) -> DreameMap | None:
+        """Decode the embedded ``rism`` saved-map blob.
+
+        The rism is URL-safe base64 + zlib-compressed in the same binary
+        format as a live map frame. It carries the canonical user-facing
+        segmentation: the IDs in ``cleanset`` and what ``clean_segment``
+        accepts. Returns ``None`` if the blob is missing or malformed.
+        """
+        if not rism_b64:
+            return None
+        try:
+            b64 = rism_b64.replace("-", "+").replace("_", "/")
+            pad = 4 - (len(b64) % 4)
+            if pad != 4:
+                b64 += "=" * pad
+            decompressed = zlib.decompress(base64.b64decode(b64))
+        except (ValueError, zlib.error, binascii.Error):
+            logger.debug("Failed to decode rism saved map", exc_info=True)
+            return None
+        try:
+            return MapDecoder._parse(decompressed, _decode_embedded_rism=False)
+        except MapDecodeError:
+            logger.debug("Failed to parse rism saved map", exc_info=True)
+            return None
+
+    @staticmethod
+    def _parse(data: bytes, _decode_embedded_rism: bool = True) -> DreameMap:
         """Parse decompressed map binary into structured data."""
         if len(data) < _HEADER_SIZE:
             raise MapDecodeError(
@@ -364,10 +443,21 @@ class MapDecoder:
                 neighbors=nei_ids,
             )
 
+        # Decode the embedded rism (saved-map) blob. The X50 firmware
+        # routinely omits seg_inf from live frames while keeping it in
+        # the rism blob, so the rism is the authoritative source of
+        # user-facing room metadata for this device family.
+        rism: DreameMap | None = None
+        if _decode_embedded_rism:
+            rism = MapDecoder._decode_rism(metadata.get("rism", ""))
+            if not rooms and rism is not None:
+                rooms = rism.rooms
+
         logger.info(
-            "Map decoded: %dx%d, %d rooms, frame=%s",
+            "Map decoded: %dx%d, %d rooms, frame=%s, rism=%s",
             header.width, header.height, len(rooms),
             "I" if header.frame_type == 73 else "P",
+            "yes" if rism is not None else "no",
         )
 
         return DreameMap(
@@ -378,4 +468,5 @@ class MapDecoder:
             paths=metadata.get("tr", []),
             obstacles=metadata.get("ai_obstacle", []),
             raw_metadata=metadata,
+            rism=rism,
         )

@@ -1,6 +1,6 @@
 [project]
 name = "dreame-mocker"
-version = "0.1.1"
+version = "0.1.2"
 description = "Python client that mocks the Dreame mobile app, enabling Home Assistant automation for the X50 Ultra Complete"
 readme = "README.md"
 license = "MIT"
