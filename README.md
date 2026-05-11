@@ -1,7 +1,5 @@
 # dreame-mocker
 
-If anything here ends up being useful to you and you feel like saying thanks, my PayPal is https://paypal.me/genericJE. Truly no expectation either way, just leaving the option here in case.
-
 Python client library and mock server for the **Dreame cloud API**. Built to control a **Dreame X50 Ultra Complete** robot vacuum from Home Assistant without depending on the Xiaomi cloud.
 
 The Dreame X50 Ultra Complete is cloud-only -- there is no local control protocol. This project replaces the Dreame phone app, sending the same HTTPS requests to Dreame's cloud servers. It also includes a local mock server for offline development and testing.
@@ -415,3 +413,5 @@ src/dreame_mocker/
   mqtt.py                       # TCP status relay (mock server)
   cli.py                        # mock server CLI entry point
 ```
+
+If anything here ends up being useful to you and you feel like saying thanks, my PayPal is https://paypal.me/genericJE. Truly no expectation either way, just leaving the option here in case.
