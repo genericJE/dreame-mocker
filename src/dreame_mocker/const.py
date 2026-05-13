@@ -55,6 +55,7 @@ class Property:
     MOP_WASH_LEVEL = (4, 45)           # 0=water-saving, 1=daily, 2=deep
     AUTO_MOUNT_MOP = (4, 46)           # bool — auto attach mop pads at start
     INTELLIGENT_RECOGNITION = (4, 49)  # bool — smart carpet detection
+    CUSTOMIZED_CLEANING = (4, 26)      # bool — gate that makes the firmware apply per-room cleanset (mode/suction/water) instead of the global cleaning_mode
     AUTO_SWITCH_SETTINGS = (4, 50)     # JSON dict (LessColl, FillinLight, AutoDry, StainIdentify, CleanType)
     AUTO_WATER_REFILLING = (4, 51)     # bool — auto refill clean-water tank
     MOP_IN_STATION = (4, 52)           # bool, RO — pads detected at base

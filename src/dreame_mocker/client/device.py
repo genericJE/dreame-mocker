@@ -195,6 +195,18 @@ class DreameDevice:
             Property.INTELLIGENT_RECOGNITION, 1 if enabled else 0,
         )
 
+    async def set_customized_cleaning(self, enabled: bool) -> None:
+        """Gate per-room cleanset application.
+
+        When True, the firmware reads cleaning_mode / suction / water /
+        cleaning_times per segment from the saved-map ``cleanset`` blob
+        instead of using the global ``cleaning_mode`` (siid 4 piid 23).
+        Mirrors the "Customized cleaning" toggle in the Dreame app.
+        """
+        await self._set_prop(
+            Property.CUSTOMIZED_CLEANING, 1 if enabled else 0,
+        )
+
     async def set_mop_wash_level(self, level: int) -> None:
         """Set wash intensity. 0=water-saving, 1=daily, 2=deep."""
         await self._set_prop(Property.MOP_WASH_LEVEL, level)
