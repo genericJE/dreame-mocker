@@ -103,6 +103,12 @@ class Action:
     UPDATE_MAP_DATA = (6, 2)
 
 # --- Device states ---
+# Values 1-14 are documented by Tasshack/dreame-vacuum (the most thorough
+# X50 reverse-engineering reference). 20-22 are X50-specific values
+# observed on real hardware (`dreame.vacuum.r2532h`) that Tasshack's enum
+# does not cover. State 22 (EMPTYING) emits between RETURNING and WASHING
+# while the dock auto-empties the robot's dustbin into the base bag —
+# duration ~30s, coincides with the cloud-side AutoEmptyStatus going ACTIVE.
 class DeviceState:
     SWEEPING = 1
     IDLE = 2
@@ -113,10 +119,14 @@ class DeviceState:
     MOPPING = 7
     DRYING = 8
     WASHING = 9
+    RETURNING_WASHING = 10
+    BUILDING = 11
     SWEEP_AND_MOP = 12
     CHARGE_COMPLETE = 13
+    UPGRADING = 14
     MOP_WASHING = 20
     MOP_WASHING_PAUSED = 21
+    EMPTYING = 22
 
 STATES: dict[int, str] = {
     1: "Sweeping",
@@ -128,10 +138,14 @@ STATES: dict[int, str] = {
     7: "Mopping",
     8: "Drying",
     9: "Washing",
+    10: "Returning to Wash",
+    11: "Building Map",
     12: "Sweep+Mop",
     13: "Charge Complete",
+    14: "Upgrading",
     20: "Mop Washing",
     21: "Mop Washing Paused",
+    22: "Emptying",
 }
 
 # --- Suction levels ---
