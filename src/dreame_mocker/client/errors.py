@@ -19,6 +19,10 @@ class TokenRevokedError(AuthenticationError):
     """The token was revoked server-side."""
 
 
+class TokenRejectedError(AuthenticationError):
+    """The server answered HTTP 401 even after a fresh login."""
+
+
 class RegionMismatchError(DreameError):
     """The configured region does not match the account's device region."""
 

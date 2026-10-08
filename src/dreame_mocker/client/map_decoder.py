@@ -213,9 +213,9 @@ class MapDecoder:
 
         body: dict[str, Any] = resp.json()
         raw_data = body.get("data", {})
-        result_data: dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}
+        result_data = cast(dict[str, Any], raw_data) if isinstance(raw_data, dict) else {}
         raw_result = result_data.get("result", {})
-        result: dict[str, Any] = raw_result if isinstance(raw_result, dict) else {}
+        result = cast(dict[str, Any], raw_result) if isinstance(raw_result, dict) else {}
         out_params: list[dict[str, Any]] = result.get("out", [])
 
         # Extract object name from response.  The primary location is

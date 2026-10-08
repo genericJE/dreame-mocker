@@ -14,7 +14,7 @@ from dreame_mocker.const import (
 )
 
 from .auth import AuthManager
-from .errors import AuthenticationError, DeviceOfflineError, DreameError
+from .errors import DeviceOfflineError, DreameError
 from .map_decoder import DreameMap, MapDecoder
 from .transport import DreameTransport
 
@@ -309,7 +309,7 @@ class DreameDevice:
     async def _rpc(
         self, method: str, params: dict[str, Any] | list[Any],
     ) -> dict[str, Any]:
-        """Send an RPC command with auto-refresh on 401."""
+        """Send an RPC command (token refreshed up front, re-login on 401)."""
         await self._auth.ensure_valid_token()
 
         payload: dict[str, Any] = {
@@ -323,19 +323,8 @@ class DreameDevice:
             },
         }
 
+        # The transport re-authenticates and retries once on 401.
         resp = await self._transport.post(SEND_COMMAND_PATH, json=payload)
-
-        # Retry once on 401.
-        if resp.status_code == 401:
-            logger.warning("Got 401 on %s, re-authenticating", method)
-            try:
-                await self._auth.revoke()
-                await self._auth.authenticate()
-            except AuthenticationError:
-                raise
-            resp = await self._transport.post(SEND_COMMAND_PATH, json=payload)
-            if resp.status_code == 401:
-                raise AuthenticationError("Re-auth failed, still getting 401")
 
         if resp.status_code != 200:
             raise DreameError(f"RPC {method} failed: HTTP {resp.status_code}")

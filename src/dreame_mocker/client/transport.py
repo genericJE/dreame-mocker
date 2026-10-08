@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any, Self
 
 import httpx
@@ -16,10 +17,14 @@ from tenacity import (
 from dreame_mocker.const import CLIENT_CREDENTIALS_B64
 
 from .crypto import make_dreame_rlc
-from .errors import RateLimitError, TransportError
+from .errors import RateLimitError, TokenRejectedError, TransportError
 from .regions import base_url
 
 logger = logging.getLogger(__name__)
+
+# Called with the rejected bearer token when a request gets HTTP 401. Returns
+# a replacement token to retry with, or ``None`` to give up.
+UnauthorizedHandler = Callable[[str], Awaitable[str | None]]
 
 # Retry on transient failures only.
 _RETRYABLE = retry_if_exception_type((
@@ -63,6 +68,7 @@ class DreameTransport:
         self._is_mock = is_mock
         self._token: str | None = None
         self._client: httpx.AsyncClient | None = None
+        self._on_unauthorized: UnauthorizedHandler | None = None
 
     async def __aenter__(self) -> Self:
         await self.open()
@@ -90,9 +96,24 @@ class DreameTransport:
     def region(self) -> str:
         return self._region
 
-    def set_token(self, token: str) -> None:
-        """Update the bearer token used in subsequent requests."""
+    @property
+    def token(self) -> str | None:
+        """The bearer token currently attached to requests."""
+        return self._token
+
+    def set_token(self, token: str | None) -> None:
+        """Update the bearer token used in subsequent requests (``None`` clears it)."""
         self._token = token
+
+    def set_unauthorized_handler(self, handler: UnauthorizedHandler | None) -> None:
+        """Register a coroutine to run when an authenticated request gets HTTP 401.
+
+        ``AuthManager`` installs one that discards the cached token and logs
+        in again, so a token the server no longer accepts (revoked, or lost
+        in a server restart) recovers transparently instead of surfacing as
+        a failed request.
+        """
+        self._on_unauthorized = handler
 
     async def switch_region(self, region: str) -> None:
         """Recreate the httpx client pointed at a new region."""
@@ -113,8 +134,48 @@ class DreameTransport:
         json: dict[str, Any] | None = None,
         params: dict[str, str] | None = None,
         extra_headers: dict[str, str] | None = None,
+        allow_reauth: bool = True,
     ) -> httpx.Response:
-        """Send a POST request with full header injection and retry."""
+        """Send a POST request with full header injection and retry.
+
+        A 401 on a request that carried a bearer token invokes the
+        unauthorized handler once and retries with the token it returns.
+        ``AuthManager`` passes ``allow_reauth=False`` for its own login and
+        refresh requests so they can never recurse into the handler.
+        """
+        resp = await self._do_post(
+            path, data=data, json=json, params=params, extra_headers=extra_headers,
+        )
+        rejected = self._token
+        if (
+            resp.status_code != 401
+            or not allow_reauth
+            or rejected is None
+            or self._on_unauthorized is None
+        ):
+            return resp
+
+        logger.warning("HTTP 401 on %s with a bearer token; re-authenticating", path)
+        if await self._on_unauthorized(rejected) is None:
+            return resp
+        resp = await self._do_post(
+            path, data=data, json=json, params=params, extra_headers=extra_headers,
+        )
+        if resp.status_code == 401:
+            raise TokenRejectedError(
+                f"Still unauthorized on {path} after re-authenticating"
+            )
+        return resp
+
+    async def _do_post(
+        self,
+        path: str,
+        *,
+        data: dict[str, str] | None,
+        json: dict[str, Any] | None,
+        params: dict[str, str] | None,
+        extra_headers: dict[str, str] | None,
+    ) -> httpx.Response:
         client = self._ensure_client()
         headers = self._build_headers()
         if extra_headers:

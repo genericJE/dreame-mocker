@@ -39,6 +39,7 @@ class AuthManager:
         self._password = password
         self._token: StoredToken | None = None
         self._refresh_lock = asyncio.Lock()
+        transport.set_unauthorized_handler(self._reauthenticate)
 
     @property
     def token(self) -> StoredToken | None:
@@ -102,6 +103,7 @@ class AuthManager:
         hashed = hash_password(self._password)
         resp = await self._transport.post(
             AUTH_PATH,
+            allow_reauth=False,
             data={
                 "grant_type": "password",
                 "scope": "all",
@@ -141,6 +143,7 @@ class AuthManager:
 
         resp = await self._transport.post(
             AUTH_PATH,
+            allow_reauth=False,
             params={
                 "grant_type": "email",
                 "email": self._username,
@@ -158,15 +161,37 @@ class AuthManager:
     async def revoke(self) -> None:
         """Clear the current token from memory and disk."""
         self._token = None
+        self._transport.set_token(None)
         await self._store.async_clear()
         logger.info("Token revoked / cleared")
 
     # --- Private helpers ---
 
+    async def _reauthenticate(self, rejected: str) -> str | None:
+        """Transport hook: the server refused *rejected*; obtain a replacement.
+
+        A cached token can look valid (not near expiry) yet be unknown to
+        the server, e.g. after it was revoked or the server lost it. The
+        refresh lock serialises concurrent 401s: if another caller already
+        replaced the token, hand that one out instead of logging in twice.
+        """
+        async with self._refresh_lock:
+            if self._token and self._token.access_token != rejected:
+                return self._token.access_token
+            logger.info("Access token rejected by the server; logging in again")
+            # The stale token stays on the transport until the login lands:
+            # a concurrent request sent token-less in that window would get
+            # a 401 the transport cannot attribute to a token and give up on.
+            self._token = None
+            await self._store.async_clear()
+            token = await self.login_password()
+            return token.access_token
+
     async def _refresh(self, refresh_token: str) -> StoredToken:
         """Use refresh_token grant to obtain a new access token."""
         resp = await self._transport.post(
             AUTH_PATH,
+            allow_reauth=False,
             data={
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
@@ -189,6 +214,7 @@ class AuthManager:
 
         resp = await self._transport.post(
             EMAIL_CODE_PATH,
+            allow_reauth=False,
             json={
                 "email": self._username,
                 "lang": "en",

@@ -10,6 +10,7 @@ from .errors import (
     MapDecodeError,
     RateLimitError,
     TokenExpiredError,
+    TokenRejectedError,
     TokenRevokedError,
     TransportError,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "RateLimitError",
     "RoomInfo",
     "TokenExpiredError",
+    "TokenRejectedError",
     "TokenRevokedError",
     "TransportError",
 ]
