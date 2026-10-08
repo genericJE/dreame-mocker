@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -43,6 +44,13 @@ class TokenStore:
     """Read/write token data to a JSON file on disk.
 
     File permissions are set to ``0o600`` (owner-only) on creation.
+
+    ``AuthManager`` only calls the ``async_*`` methods, which run the
+    blocking ones in a worker thread so an event loop is never stalled on
+    disk I/O. To store tokens elsewhere (a database, memory, a config
+    directory you manage) subclass and override ``load``/``save``/``clear``,
+    or the ``async_*`` methods directly, and pass the instance as
+    ``DreameCloud(token_store=...)``.
     """
 
     def __init__(self, path: Path | None = None) -> None:
@@ -90,3 +98,15 @@ class TokenStore:
             logger.debug("Cleared cached token at %s", self._path)
         except OSError:
             pass
+
+    async def async_load(self) -> StoredToken | None:
+        """``load`` without blocking the event loop."""
+        return await asyncio.to_thread(self.load)
+
+    async def async_save(self, token: StoredToken) -> None:
+        """``save`` without blocking the event loop."""
+        await asyncio.to_thread(self.save, token)
+
+    async def async_clear(self) -> None:
+        """``clear`` without blocking the event loop."""
+        await asyncio.to_thread(self.clear)

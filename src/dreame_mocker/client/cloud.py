@@ -53,7 +53,13 @@ class DreameCloud:
         host: str | None = None,
         port: int = 13267,
         token_path: Path | None = None,
+        token_store: TokenStore | None = None,
     ) -> None:
+        """Create a client.
+
+        ``token_store`` replaces the default disk cache (see ``TokenStore``);
+        when given, ``token_path`` is ignored.
+        """
         is_mock = host is not None
         resolved_region = region
 
@@ -62,7 +68,9 @@ class DreameCloud:
         self._transport = DreameTransport(
             region=resolved_region, host=host, port=port, is_mock=is_mock,
         )
-        self._token_store = TokenStore(path=token_path)
+        if token_store is None:
+            token_store = TokenStore(path=token_path)
+        self._token_store = token_store
         self._auth = AuthManager(
             transport=self._transport,
             token_store=self._token_store,

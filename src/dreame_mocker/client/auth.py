@@ -54,7 +54,7 @@ class AuthManager:
         5. Persist new token to disk
         """
         # Try cached token.
-        cached = self._store.load()
+        cached = await self._store.async_load()
         if cached and cached.username == self._username:
             if not cached.needs_refresh:
                 logger.info("Using cached token (uid=%s, expires in %.0fs)",
@@ -121,7 +121,7 @@ class AuthManager:
         if resp.status_code != 200:
             raise AuthenticationError(f"Login failed: HTTP {resp.status_code}")
 
-        return self._process_token_response(resp.json())
+        return await self._process_token_response(resp.json())
 
     async def login_email_code(
         self,
@@ -153,12 +153,12 @@ class AuthManager:
         if resp.status_code != 200:
             raise AuthenticationError(f"Email code auth failed: {resp.text}")
 
-        return self._process_token_response(resp.json())
+        return await self._process_token_response(resp.json())
 
     async def revoke(self) -> None:
         """Clear the current token from memory and disk."""
         self._token = None
-        self._store.clear()
+        await self._store.async_clear()
         logger.info("Token revoked / cleared")
 
     # --- Private helpers ---
@@ -179,7 +179,7 @@ class AuthManager:
         if resp.status_code != 200:
             raise TokenExpiredError(f"Token refresh failed: HTTP {resp.status_code}")
 
-        return self._process_token_response(resp.json())
+        return await self._process_token_response(resp.json())
 
     async def _request_email_code(self) -> str:
         """POST /dreame-auth/oauth/email — request a verification code."""
@@ -210,7 +210,7 @@ class AuthManager:
         logger.info("Email code sent to %s (%d sends remaining)", self._username, remains)
         return code_key
 
-    def _process_token_response(self, body: dict[str, Any]) -> StoredToken:
+    async def _process_token_response(self, body: dict[str, Any]) -> StoredToken:
         """Parse a token response, persist it, and update transport."""
         access_token = str(body.get("access_token", ""))
         if not access_token:
@@ -229,5 +229,5 @@ class AuthManager:
 
         self._token = token
         self._transport.set_token(access_token)
-        self._store.save(token)
+        await self._store.async_save(token)
         return token
