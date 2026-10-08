@@ -104,9 +104,10 @@ async with DreameCloud(username="you@gmail.com", password="secret") as cloud:
 
 ### Features
 
-- **Token caching** -- tokens are persisted to `~/.config/dreame-mocker/tokens.json` (0o600 permissions) and reused across runs. Auto-refreshes when within 5 minutes of expiry.
+- **Token caching** -- tokens are persisted to `~/.config/dreame-mocker/tokens.json` (0o600 permissions) and reused across runs. Auto-refreshes when within 5 minutes of expiry. Disk I/O runs in a worker thread, never on the event loop. Pass `token_path=` to move the file, or `token_store=` with a `TokenStore` subclass to keep tokens anywhere else (memory, a database, your app's config directory).
 - **Region auto-detection** -- authenticates on any region (default: `eu`), then auto-switches to the correct device region based on your account's `country` field.
-- **Retry with backoff** -- transient failures (connect/timeout/transport errors) are retried with exponential backoff (up to 3 attempts). 401s trigger automatic re-authentication.
+- **Retry with backoff** -- transient failures (connect/timeout/transport errors) are retried with exponential backoff (up to 3 attempts).
+- **Re-login on 401** -- a cached token can look valid yet be unknown to the server (revoked, or lost in a server restart). Any request that gets HTTP 401 with a bearer token attached discards the token, logs in again with the password and is retried once; concurrent requests share a single login. A second 401 raises `TokenRejectedError`.
 - **Map decoding** -- full pipeline: base64 > AES-256-CBC decrypt > zlib decompress > parse 27-byte header + pixel grid + trailing JSON (rooms, walls, paths, obstacles).
 - **Mock mode** -- when connecting to `localhost`/`127.0.0.1`, cloud-specific headers (Dreame-RLC, Dreame-Meta, etc.) are skipped.
 
@@ -155,6 +156,7 @@ All exceptions inherit from `DreameError`:
 | `AuthenticationError` | Login failed or re-auth failed |
 | `TokenExpiredError` | Token expired and refresh failed |
 | `TokenRevokedError` | Token was revoked server-side |
+| `TokenRejectedError` | Server still answered 401 after a fresh login |
 | `DeviceNotFoundError` | Requested device not on account |
 | `DeviceOfflineError` | Device is offline (cloud error -1 or -9999) |
 | `RateLimitError` | HTTP 429 (has `.retry_after` attribute) |
@@ -381,6 +383,7 @@ The mock server generates synthetic map data with rooms, walls, and robot/charge
 ```bash
 uv sync                              # install deps
 uv run pyright                        # type check (strict mode, 0 errors)
+uv run pytest                         # client tests against an in-process mock server
 uv run dreame-mocker --log-level DEBUG  # run mock server
 uv run python test_client.py          # test against real cloud
 uv run python test_client.py --status # read-only status check

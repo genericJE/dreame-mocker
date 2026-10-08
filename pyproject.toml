@@ -1,6 +1,6 @@
 [project]
 name = "dreame-mocker"
-version = "0.1.4"
+version = "0.1.5"
 description = "Python client that mocks the Dreame mobile app, enabling Home Assistant automation for the X50 Ultra Complete"
 readme = "README.md"
 license = "MIT"
@@ -28,8 +28,14 @@ dreame-mocker = "dreame_mocker.cli:main"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pyright>=1.1.408",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
     "python-dotenv>=1.0.0",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

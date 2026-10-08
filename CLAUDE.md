@@ -17,7 +17,7 @@
 
 ## Related project: ha-dreame-cloud
 
-The Home Assistant integration lives in a separate repo at `/Users/je/Documents/JE/Python/ha-dreame-cloud/` (GitHub: `genericJE/ha-dreame-cloud`). It's called **"Dreame Cloud Vacuum"** in HACS/HA UI, with domain `dreame_cloud`. Current version: `v0.1.4`.
+The Home Assistant integration lives in a separate repo at `/Users/je/Documents/JE/repos/ha-dreame-cloud/` (GitHub: `genericJE/ha-dreame-cloud`). It's called **"Dreame Cloud Vacuum"** in HACS/HA UI, with domain `dreame_cloud`.
 
 The HA integration depends on this repo's client library (`dreame_mocker.client`) via `git+https://github.com/genericJE/dreame-mocker.git` in its `manifest.json`. Changes to the client library must be pushed to GitHub before the HA integration can pick them up via HACS redownload.
 
@@ -49,7 +49,8 @@ Entities < DreameCloudData (status + map + consumables + dnd + volume)
 - `uv run python test_client.py --map` -- fetch and summarize map data
 - `uv run dreame-mocker` -- run the local mock server
 - `uv run dreame-mocker --log-level DEBUG` -- run mock server with debug logging
-- `uv run pyright` -- type check (must be 0 errors)
+- `uv run pyright` -- type check (must be 0 errors; covers `src`, `test_client.py` and `tests`)
+- `uv run pytest` -- client tests; they run the mock server in-process through `httpx.ASGITransport`, so no ports are opened (see `tests/conftest.py`)
 
 ## Dreame cloud API research
 
@@ -240,10 +241,12 @@ The client library is a fully async Python library in `src/dreame_mocker/client/
 ### Key design decisions
 
 - **Token auto-refresh**: `auth.ensure_valid_token()` is called before every API request. If the token is within 5 minutes of expiry, it refreshes automatically.
-- **Retry strategy**: Tenacity with 3 attempts, exponential backoff 1-30s with jitter, on `ConnectError`/`ReadTimeout`/`WriteTimeout`/`PoolTimeout`/`TransportError`. 401s trigger re-auth (not retry). 429s raise `RateLimitError`.
+- **Retry strategy**: Tenacity with 3 attempts, exponential backoff 1-30s with jitter, on `ConnectError`/`ReadTimeout`/`WriteTimeout`/`PoolTimeout`/`TransportError`. 429s raise `RateLimitError`.
+- **Re-login on 401 lives in the transport**: `DreameTransport.post()` calls the handler registered via `set_unauthorized_handler()` (installed by `AuthManager.__init__`) when a request that carried a bearer token gets 401, then retries once; a second 401 raises `TokenRejectedError`. This covers every call site (device list, RPCs, map download URL) without each of them handling it. `AuthManager` passes `allow_reauth=False` on its own login/refresh/email-code requests so they can never recurse into the handler. `AuthManager._reauthenticate()` runs under the refresh lock and compares the rejected token with the current one, so concurrent 401s cause one login, and the stale token stays on the transport until the login lands (a token-less request in that window would get an unattributable 401). Needed because `authenticate()` trusts a cached token that is not near expiry without asking the server; a server that revoked or lost it (the mock server forgets tokens on restart) answered 401 to everything until the expiry-based refresh.
+- **Token store is async and injectable**: `AuthManager` only calls `TokenStore.async_load/async_save/async_clear`, which run the blocking file methods in a worker thread (`asyncio.to_thread`), so Home Assistant's blocking-I/O detector stays quiet. `DreameCloud(token_store=...)` accepts any `TokenStore` subclass (override the sync methods or the async ones); `token_path=` keeps working for the default disk store.
 - **Region switching**: `transport.switch_region()` closes the old `httpx.AsyncClient` and creates a new one pointed at the correct host.
 - **Mock mode**: When `host` is `localhost`/`127.0.0.1`, cloud headers (Dreame-RLC, Dreame-Meta, etc.) are skipped.
-- **`_rpc()` auto-retry on 401**: The `DreameDevice._rpc()` method retries once on HTTP 401 after re-authenticating.
+- **`_rpc()` has no 401 logic of its own**: it relies on the transport-level re-login above.
 - **Reconnect safety**: `connect()` always closes and reopens the transport to avoid stale connections.
 - **Token file permissions**: Written atomically with `os.open(O_CREAT, 0o600)` to avoid permission race conditions.
 

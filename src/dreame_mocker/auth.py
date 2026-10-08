@@ -45,6 +45,10 @@ class TokenStore:
         self._tokens[access_token] = record
         return record
 
+    def clear(self) -> None:
+        """Forget every issued token, as a restarted server would."""
+        self._tokens.clear()
+
     def validate(self, token: str) -> bool:
         record = self._tokens.get(token)
         if not record:
