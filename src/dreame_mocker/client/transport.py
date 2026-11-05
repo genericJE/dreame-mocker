@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import ssl
 from collections.abc import Awaitable, Callable
 from typing import Any, Self
 
@@ -50,6 +52,11 @@ class DreameTransport:
     - Header injection (auth, RLC, tenant, user-agent)
     - Retry with exponential backoff on transient failures
     - Region switching mid-session
+
+    httpx builds a TLS context for every client it constructs, which reads
+    the CA bundle from disk. The transport builds that context once in a
+    worker thread and hands it to each client, so opening, reconnecting,
+    switching region and downloading never stall an event loop on it.
     """
 
     def __init__(
@@ -68,6 +75,7 @@ class DreameTransport:
         self._is_mock = is_mock
         self._token: str | None = None
         self._client: httpx.AsyncClient | None = None
+        self._ssl_context: ssl.SSLContext | None = None
         self._on_unauthorized: UnauthorizedHandler | None = None
 
     async def __aenter__(self) -> Self:
@@ -84,6 +92,7 @@ class DreameTransport:
 
     async def open(self) -> None:
         """Create the underlying httpx client."""
+        await self._ensure_ssl_context()
         self._client = self._make_client()
 
     async def close(self) -> None:
@@ -123,6 +132,7 @@ class DreameTransport:
         self._region = region
         if self._client:
             await self._client.aclose()
+        await self._ensure_ssl_context()
         self._client = self._make_client()
 
     @_RETRY_POLICY
@@ -210,7 +220,8 @@ class DreameTransport:
     )
     async def download(self, url: str) -> bytes:
         """Download from an arbitrary URL (e.g. pre-signed map file URL)."""
-        async with httpx.AsyncClient(timeout=30.0) as tmp:
+        ssl_context = await self._ensure_ssl_context()
+        async with httpx.AsyncClient(timeout=30.0, verify=ssl_context) as tmp:
             resp = await tmp.get(url)
             if resp.status_code >= 500:
                 raise TransportError(f"Download error {resp.status_code}: {url}")
@@ -219,13 +230,21 @@ class DreameTransport:
 
     # --- Private ---
 
+    async def _ensure_ssl_context(self) -> ssl.SSLContext:
+        """Return the shared TLS context, building it in a worker thread once."""
+        if self._ssl_context is None:
+            self._ssl_context = await asyncio.to_thread(httpx.create_ssl_context)
+        return self._ssl_context
+
     def _make_client(self) -> httpx.AsyncClient:
         if self._is_mock:
             host = self._host or "localhost"
             url = f"http://{host}:{self._port}"
         else:
             url = base_url(self._region, self._port)
-        return httpx.AsyncClient(base_url=url, timeout=self._timeout)
+        # ``True`` only when called before ``open()``; httpx then builds its own.
+        verify = self._ssl_context if self._ssl_context is not None else True
+        return httpx.AsyncClient(base_url=url, timeout=self._timeout, verify=verify)
 
     def _ensure_client(self) -> httpx.AsyncClient:
         if self._client is None:

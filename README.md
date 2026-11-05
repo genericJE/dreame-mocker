@@ -105,6 +105,7 @@ async with DreameCloud(username="you@gmail.com", password="secret") as cloud:
 ### Features
 
 - **Token caching** -- tokens are persisted to `~/.config/dreame-mocker/tokens.json` (0o600 permissions) and reused across runs. Auto-refreshes when within 5 minutes of expiry. Disk I/O runs in a worker thread, never on the event loop. Pass `token_path=` to move the file, or `token_store=` with a `TokenStore` subclass to keep tokens anywhere else (memory, a database, your app's config directory).
+- **No blocking TLS setup** -- httpx reads the CA bundle from disk for every client it builds. The transport builds one TLS context in a worker thread and reuses it for every connect, region switch and map download, so an event loop is never stalled on it.
 - **Region auto-detection** -- authenticates on any region (default: `eu`), then auto-switches to the correct device region based on your account's `country` field.
 - **Retry with backoff** -- transient failures (connect/timeout/transport errors) are retried with exponential backoff (up to 3 attempts).
 - **Re-login on 401** -- a cached token can look valid yet be unknown to the server (revoked, or lost in a server restart). Any request that gets HTTP 401 with a bearer token attached discards the token, logs in again with the password and is retried once; concurrent requests share a single login. A second 401 raises `TokenRejectedError`.
